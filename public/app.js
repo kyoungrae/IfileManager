@@ -62,6 +62,17 @@ function formatSize(bytes) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
 }
 
+// macOS Disk Utility and df report volume capacity in decimal units. Keep the
+// storage card aligned with the actual values the user sees on the host.
+function formatStorageSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '–';
+  if (bytes < 1000) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1000; let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit += 1; }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+}
+
 function pathParts(path) { return path ? path.split('/') : []; }
 function parentPath() { const parts = pathParts(state.currentPath); parts.pop(); return parts.join('/'); }
 function nameMatches(name) { return name.toLocaleLowerCase('ko-KR').includes(state.query.toLocaleLowerCase('ko-KR')); }
@@ -165,15 +176,15 @@ function setView(view) {
 
 function renderStorage(storage) {
   const total = storage.totalBytes; const free = storage.freeBytes; const used = storage.usedBytes;
-  const percent = total ? Math.min(100, Math.max(0, Math.round((used / total) * 100))) : 0;
-  $('#storage-ring').style.setProperty('--storage-progress', percent);
-  $('#storage-percent').textContent = `${percent}%`;
-  $('#storage-free').textContent = formatSize(free);
-  $('#storage-total').textContent = `/ ${formatSize(total)}`;
-  $('#storage-used').textContent = formatSize(used);
-  $('#storage-free-detail').textContent = formatSize(free);
-  $('#mini-storage-progress').style.width = `${percent}%`;
-  $('#mini-storage-value').textContent = `${formatSize(free)} / ${formatSize(total)}  ${percent}%`;
+  const freePercent = total ? Math.min(100, Math.max(0, Math.round((free / total) * 100))) : 0;
+  $('#storage-ring').style.setProperty('--storage-progress', freePercent);
+  $('#storage-percent').textContent = `${freePercent}%`;
+  $('#storage-free').textContent = formatStorageSize(free);
+  $('#storage-total').textContent = `/ ${formatStorageSize(total)}`;
+  $('#storage-used').textContent = formatStorageSize(used);
+  $('#storage-free-detail').textContent = formatStorageSize(free);
+  $('#mini-storage-progress').style.width = `${freePercent}%`;
+  $('#mini-storage-value').textContent = `${formatStorageSize(free)} / ${formatStorageSize(total)}  ${freePercent}%`;
 }
 
 async function loadStorage() {
