@@ -9,8 +9,7 @@ const state = {
   fileListTransitionId: 0,
   section: 'files',
   v4Logs: { path: '', entries: [] },
-  query: '',
-  view: 'grid'
+  query: ''
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -265,6 +264,20 @@ function v4LogRow(entry) {
   row.append(type, name, metadata, size, actions); return row;
 }
 
+function v4LogParentRow() {
+  const parent = parentPath(state.v4Logs.path);
+  const row = document.createElement('article'); row.className = 'file-row v4-log-row v4-log-parent'; row.setAttribute('role', 'row');
+  const type = svgIcon('folder', 'v4-log-type');
+  const name = document.createElement('button'); name.className = 'file-name v4-log-folder'; name.type = 'button'; name.textContent = '...';
+  name.title = '상위 폴더로 이동'; name.setAttribute('aria-label', '상위 폴더로 이동');
+  name.addEventListener('click', () => loadV4Logs(parent));
+  const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = '상위 폴더';
+  const size = document.createElement('span'); size.className = 'file-size'; size.textContent = '–';
+  const actions = document.createElement('div'); actions.className = 'file-actions';
+  const open = document.createElement('button'); open.className = 'log-open'; open.type = 'button'; open.textContent = '열기'; open.addEventListener('click', () => loadV4Logs(parent));
+  actions.append(open); row.append(type, name, metadata, size, actions); return row;
+}
+
 function emptyV4Logs() {
   const panel = document.createElement('section'); panel.className = 'empty-panel file-empty';
   const title = document.createElement('h3'); title.textContent = '표시할 V4 로그가 없습니다.';
@@ -275,7 +288,8 @@ function emptyV4Logs() {
 function renderV4LogList() {
   const entries = state.v4Logs.entries.filter((entry) => nameMatches(entry.name));
   const list = $('#v4-log-list');
-  list.replaceChildren(...(entries.length ? [v4LogTableHeader(), ...entries.map(v4LogRow)] : [state.query ? emptySearch('V4 로그') : emptyV4Logs()]));
+  const parent = state.v4Logs.path ? [v4LogParentRow()] : [];
+  list.replaceChildren(...(entries.length || parent.length ? [v4LogTableHeader(), ...parent, ...entries.map(v4LogRow)] : [state.query ? emptySearch('V4 로그') : emptyV4Logs()]));
   $('#v4-log-count').textContent = `${entries.length}개`;
   $('#v4-log-title').textContent = state.v4Logs.path ? `${pathParts(state.v4Logs.path).at(-1)}의 V4Log` : 'V4Log';
 }
@@ -351,7 +365,7 @@ function setWorkspaceSection(section) {
   $('#v4-log-section').hidden = !isV4Log;
   $('#new-folder-button').hidden = isV4Log;
   $('#toolbar-upload').hidden = isV4Log;
-  $('#view-switch').hidden = isV4Log;
+  $('#up-button').hidden = isV4Log;
   $('#file-search').placeholder = isV4Log ? 'V4 로그 파일명으로 검색하세요.' : '파일명으로 검색하세요.';
   document.querySelectorAll('.side-nav-item').forEach((button) => {
     const active = button.dataset.nav === section;
@@ -379,14 +393,6 @@ async function showV4Logs() {
   state.query = ''; $('#file-search').value = '';
   setWorkspaceSection('v4log');
   await loadV4Logs(state.v4Logs.path);
-}
-
-function setView(view) {
-  state.view = view;
-  const grid = view === 'grid';
-  $('#grid-view-button').classList.toggle('active', grid); $('#list-view-button').classList.toggle('active', !grid);
-  $('#grid-view-button').setAttribute('aria-pressed', String(grid)); $('#list-view-button').setAttribute('aria-pressed', String(!grid));
-  renderFileList();
 }
 
 function renderStorage(storage) {
@@ -439,11 +445,16 @@ function openFileDeleteDialog(file) {
   $('#delete-dialog').showModal();
 }
 
-async function uploadSelectedFile(file) {
-  if (!file) return;
-  const data = new FormData(); data.append('folderPath', state.currentPath); data.append('file', file);
-  setStatus(`“${file.name}” 암호화 후 업로드 중…`);
-  try { await request('/api/files', { method: 'POST', body: data }); await loadFolder(); await refreshStorageAfterMutation(); setStatus('파일을 암호화하여 업로드했습니다.'); }
+async function uploadSelectedFiles(files) {
+  const selectedFiles = [...(files ?? [])];
+  if (!selectedFiles.length) return;
+  const data = new FormData(); data.append('folderPath', state.currentPath); selectedFiles.forEach((file) => data.append('files', file));
+  setStatus(selectedFiles.length === 1 ? `“${selectedFiles[0].name}” 암호화 후 업로드 중…` : `${selectedFiles.length}개 파일을 암호화 후 업로드 중…`);
+  try {
+    const result = await request('/api/files', { method: 'POST', body: data });
+    await loadFolder(); await refreshStorageAfterMutation();
+    setStatus(result.files.length === 1 ? '파일을 암호화하여 업로드했습니다.' : `${result.files.length}개 파일을 암호화하여 업로드했습니다.`);
+  }
   catch (error) { setStatus(error.message, true); }
 }
 
@@ -456,7 +467,7 @@ async function refreshStorageAfterMutation() {
 function attachUploadDropzone(panel) {
   ['dragenter', 'dragover'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.add('dragover'); }));
   ['dragleave', 'drop'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.remove('dragover'); }));
-  panel.addEventListener('drop', (event) => uploadSelectedFile(event.dataTransfer?.files?.[0]));
+  panel.addEventListener('drop', (event) => uploadSelectedFiles(event.dataTransfer?.files));
   panel.addEventListener('click', () => $('#file-input').click());
   panel.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#file-input').click(); } });
 }
@@ -483,9 +494,7 @@ $('#up-button').addEventListener('click', () => {
 $('#new-folder-button').addEventListener('click', openFolderDialog);
 $('#collapse-folders-button').addEventListener('click', () => setAllFoldersExpanded(!state.expandedFolderPaths.has('')));
 $('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); if (state.section === 'v4log') renderV4LogList(); else renderFileList(); });
-$('#grid-view-button').addEventListener('click', () => setView('grid'));
-$('#list-view-button').addEventListener('click', () => setView('list'));
-$('#file-input').addEventListener('change', async (event) => { await uploadSelectedFile(event.target.files?.[0]); event.target.value = ''; });
+$('#file-input').addEventListener('change', async (event) => { await uploadSelectedFiles(event.target.files); event.target.value = ''; });
 
 document.querySelectorAll('dialog button[value="cancel"]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 document.querySelectorAll('.side-nav-item').forEach((button) => button.addEventListener('click', () => {

@@ -17,6 +17,7 @@ services:
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+      MAX_UPLOAD_FILES: ${MAX_UPLOAD_FILES:-20}
     ports:
       # Bind only to the Tailscale interface when PUBLIC_BIND_IP is set.
       - "${PUBLIC_BIND_IP:-127.0.0.1}:${APP_PORT:-4300}:3000"

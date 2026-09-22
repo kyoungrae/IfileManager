@@ -48,11 +48,7 @@
               <div class="toolbar-actions">
                 <button class="quiet icon-button" id="up-button" type="button"><span data-icon="arrow-up" aria-hidden="true"></span><span>상위 폴더</span></button>
                 <button class="outline-button" id="new-folder-button" type="button"><span data-icon="folder-plus" aria-hidden="true"></span><span>새 폴더</span></button>
-                <label class="upload-button" id="toolbar-upload"><span data-icon="upload" aria-hidden="true"></span><span>파일 업로드</span><input id="file-input" type="file"></label>
-                <div class="view-switch" id="view-switch" role="group" aria-label="보기 방식">
-                  <button class="view-button active" id="grid-view-button" type="button" aria-label="격자 보기" aria-pressed="true"><span data-icon="grid" aria-hidden="true"></span></button>
-                  <button class="view-button" id="list-view-button" type="button" aria-label="목록 보기" aria-pressed="false"><span data-icon="list" aria-hidden="true"></span></button>
-                </div>
+                <label class="upload-button" id="toolbar-upload"><span data-icon="upload" aria-hidden="true"></span><span>파일 업로드</span><input id="file-input" type="file" multiple></label>
               </div>
             </section>
             <p id="status" class="status" role="status"></p>
@@ -67,7 +63,7 @@
               </aside>
             </div>
             <section class="content-section files-section" id="files-section" aria-live="polite"><div class="section-heading"><h2 id="files-title">내 파일의 파일</h2><span id="file-count">0개</span></div><div id="file-list" class="file-list" role="table"></div></section>
-            <section id="upload-drop-zone" class="upload-dropbar" tabindex="0" aria-label="파일 업로드 영역"><span class="dropbar-icon" data-icon="upload" aria-hidden="true"></span><div><strong>파일을 끌어놓거나 업로드하세요</strong><span>업로드한 파일은 암호화되어 저장됩니다.</span></div><button class="outline-button" id="drop-upload-button" type="button"><span data-icon="upload" aria-hidden="true"></span>파일 선택</button></section>
+            <section id="upload-drop-zone" class="upload-dropbar" tabindex="0" aria-label="파일 업로드 영역"><span class="dropbar-icon" data-icon="upload" aria-hidden="true"></span><div><strong>파일을 끌어놓거나 여러 파일을 선택하세요</strong><span>업로드한 파일은 암호화되어 저장됩니다.</span></div><button class="outline-button" id="drop-upload-button" type="button"><span data-icon="upload" aria-hidden="true"></span>파일 선택</button></section>
             <section id="v4-log-section" class="content-section files-section v4-log-section" aria-live="polite" hidden><div class="section-heading"><h2 id="v4-log-title">V4Log</h2><span id="v4-log-count">0개</span><span class="read-only-label">읽기 전용</span></div><div id="v4-log-list" class="file-list" role="table"></div></section>
           </div>
         </section>

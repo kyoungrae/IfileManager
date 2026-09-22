@@ -41,7 +41,7 @@ app.use(cookieParser());
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } });
 const upload = multer({
   storage: multer.diskStorage({ destination: tempRoot, filename: (_request, _file, callback) => callback(null, `${crypto.randomUUID()}.upload`) }),
-  limits: { fileSize: config.maxUploadBytes, files: 1, fields: 5 },
+  limits: { fileSize: config.maxUploadBytes, files: config.maxUploadFiles, fields: 5 },
   fileFilter: (_request, file, callback) => callback(null, Boolean(file.originalname))
 });
 
@@ -56,6 +56,13 @@ function clientFilename(name) {
   const result = path.basename(String(name)).replace(/[\u0000-\u001f\u007f]/g, '_').slice(0, 240);
   if (!result) throw new Error('Invalid file name');
   return result;
+}
+
+function managedFilename(name) {
+  const source = String(name);
+  if (!/[\u0080-\u009f\u00c0-\u00ff]/.test(source)) return clientFilename(source);
+  const decoded = Buffer.from(source, 'latin1').toString('utf8');
+  return clientFilename(decoded.includes('\uFFFD') ? source : decoded);
 }
 
 function parentRelativePath(relativePath) {
@@ -219,7 +226,7 @@ app.get('/api/folders', requireAuth, asyncRoute(async (request, response) => {
     .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   const visibleFiles = files.map((file) => ({
     id: file.fileId,
-    name: open(file.nameEncrypted),
+    name: managedFilename(open(file.nameEncrypted)),
     mime: open(file.mimeEncrypted),
     size: file.size,
     createdAt: file.createdAt
@@ -329,26 +336,35 @@ app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (req
   response.status(204).end();
 }));
 
-app.post('/api/files', requireAppRequest, requireAuth, upload.single('file'), asyncRoute(async (request, response) => {
-  if (!request.file) return response.status(400).json({ error: 'A file is required' });
+app.post('/api/files', requireAppRequest, requireAuth, upload.array('files', config.maxUploadFiles), asyncRoute(async (request, response) => {
+  const uploadedFiles = request.files ?? [];
+  if (!uploadedFiles.length) return response.status(400).json({ error: 'At least one file is required' });
   const folder = await existingDirectory(request.body?.folderPath);
-  const originalName = clientFilename(request.file.originalname);
-  const storageId = crypto.randomUUID();
-  const encryptedPath = filePathFor(storageId);
+  const encryptedPaths = [];
+  const records = [];
+  const totalBytes = uploadedFiles.reduce((total, file) => total + file.size, 0);
   try {
-    await encryptFile(request.file.path, encryptedPath);
-    const record = await ManagedFile.create({
-      fileId: crypto.randomUUID(), storageId, folderPathKey: keyForPath(folder.normalized),
-      nameEncrypted: seal(originalName), mimeEncrypted: seal(request.file.mimetype || 'application/octet-stream'),
-      size: request.file.size, uploadedBy: request.user.id
-    });
-    await audit(request.user.id, 'file.upload', `${folder.normalized}/${originalName}`, { bytes: request.file.size });
-    response.status(201).json({ id: record.fileId, name: originalName, size: request.file.size });
+    for (const file of uploadedFiles) {
+      const originalName = managedFilename(file.originalname);
+      const storageId = crypto.randomUUID();
+      const encryptedPath = filePathFor(storageId);
+      await encryptFile(file.path, encryptedPath);
+      encryptedPaths.push(encryptedPath);
+      const record = await ManagedFile.create({
+        fileId: crypto.randomUUID(), storageId, folderPathKey: keyForPath(folder.normalized),
+        nameEncrypted: seal(originalName), mimeEncrypted: seal(file.mimetype || 'application/octet-stream'),
+        size: file.size, uploadedBy: request.user.id
+      });
+      records.push({ id: record.fileId, name: originalName, size: file.size });
+    }
+    await audit(request.user.id, 'file.upload', folder.normalized, { files: records.length, bytes: totalBytes });
+    response.status(201).json({ files: records });
   } catch (error) {
-    await fs.unlink(encryptedPath).catch(() => undefined);
+    await Promise.all(encryptedPaths.map((encryptedPath) => fs.unlink(encryptedPath).catch(() => undefined)));
+    if (records.length) await ManagedFile.deleteMany({ fileId: { $in: records.map((record) => record.id) } });
     throw error;
   } finally {
-    await fs.unlink(request.file.path).catch(() => undefined);
+    await Promise.all(uploadedFiles.map((file) => fs.unlink(file.path).catch(() => undefined)));
   }
 }));
 
@@ -375,7 +391,7 @@ app.delete('/api/files/:fileId', requireAppRequest, requireAuth, asyncRoute(asyn
 app.get('/api/files/:fileId/download', requireAuth, asyncRoute(async (request, response) => {
   const file = await ManagedFile.findOne({ fileId: request.params.fileId }).lean();
   if (!file) return response.status(404).json({ error: 'File not found' });
-  const name = clientFilename(open(file.nameEncrypted));
+  const name = managedFilename(open(file.nameEncrypted));
   response.set({ 'Content-Type': open(file.mimeEncrypted), 'Content-Length': String(file.size), 'Cache-Control': 'no-store' });
   response.attachment(name);
   await audit(request.user.id, 'file.download', name, { fileId: file.fileId });
@@ -384,8 +400,17 @@ app.get('/api/files/:fileId/download', requireAuth, asyncRoute(async (request, r
 
 app.use('/api', (_request, response) => response.status(404).json({ error: 'Not found' }));
 app.use(express.static(new URL('../public', import.meta.url).pathname, { index: 'index.html', etag: false, maxAge: 0 }));
-app.use((error, _request, response, _next) => {
-  if (error instanceof multer.MulterError) return response.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? `Files must be ${config.maxUploadBytes / 1024 / 1024} MB or smaller` : 'Invalid upload' });
+app.use(async (error, request, response, _next) => {
+  if (error instanceof multer.MulterError) {
+    const temporaryFiles = Array.isArray(request.files) ? request.files : request.file ? [request.file] : [];
+    await Promise.all(temporaryFiles.map((file) => fs.unlink(file.path).catch(() => undefined)));
+    const message = error.code === 'LIMIT_FILE_SIZE'
+      ? `Files must be ${config.maxUploadBytes / 1024 / 1024} MB or smaller`
+      : error.code === 'LIMIT_FILE_COUNT'
+        ? `Upload no more than ${config.maxUploadFiles} files at once`
+        : 'Invalid upload';
+    return response.status(400).json({ error: message });
+  }
   if (error?.code === 'EEXIST') return response.status(409).json({ error: 'A folder with that name already exists' });
   if (error?.code === 'ENOENT') return response.status(404).json({ error: 'Folder or file not found' });
   if (error?.code === 11000) return response.status(409).json({ error: 'That record already exists' });
