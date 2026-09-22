@@ -2,7 +2,6 @@
 // Keeping the build and deployment logic in Git makes every deployment auditable.
 def runPipeline = {
   properties([
-    pipelineTriggers([cron('H/2 * * * *')]),
     disableConcurrentBuilds(),
     buildDiscarder(logRotator(daysToKeepStr: '14', numToKeepStr: '30'))
   ])
@@ -12,16 +11,9 @@ def runPipeline = {
       // Match the existing Compose project's label so Jenkins replaces its container.
       'COMPOSE_PROJECT_NAME=ifilemanager',
       "DEPLOY_ENV_FILE=${env.JENKINS_HOME}/ifile-manager.env",
-      "IMAGE_TAG=${env.BUILD_NUMBER}",
-      "DEPLOY_STATE_FILE=${env.JENKINS_HOME}/ifile-manager.last-deployed-commit"
+      "IMAGE_TAG=${env.BUILD_NUMBER}"
     ]) {
-      def commit = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-      def previousCommit = sh(script: 'test -r "$DEPLOY_STATE_FILE" && cat "$DEPLOY_STATE_FILE" || true', returnStdout: true).trim()
-      if (commit == previousCommit) {
-        echo "${commit} is already deployed; skipping build and deployment."
-        currentBuild.result = 'NOT_BUILT'
-      } else {
-        stage('Verify') {
+      stage('Verify') {
         sh '''#!/bin/sh
           set -eu
           test -r "$DEPLOY_ENV_FILE"
@@ -32,14 +24,14 @@ def runPipeline = {
         '''
       }
 
-        stage('Build image') {
+      stage('Build image') {
         sh '''#!/bin/sh
           set -eu
           docker compose --env-file "$DEPLOY_ENV_FILE" build
         '''
       }
 
-        stage('Deploy') {
+      stage('Deploy') {
         sh '''#!/bin/sh
           set -eu
           docker compose --env-file "$DEPLOY_ENV_FILE" up -d --no-build --force-recreate --remove-orphans --wait
@@ -47,14 +39,11 @@ def runPipeline = {
         '''
       }
 
-        stage('Health check') {
+      stage('Health check') {
         sh '''#!/bin/sh
           set -eu
           test "$(docker inspect --format '{{.State.Health.Status}}' ifile-manager)" = healthy
-          git rev-parse HEAD > "$DEPLOY_STATE_FILE"
-          chmod 600 "$DEPLOY_STATE_FILE"
         '''
-        }
       }
     }
   }

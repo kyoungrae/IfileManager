@@ -82,9 +82,9 @@ sh scripts/install-storage-stats-agent.sh
 
 설치 스크립트는 `.env`에서 `REMOVABLE_DISK_PATH`만 읽으며 다른 비밀값은 읽거나 출력하지 않습니다. 갱신 파일은 호스트의 `/tmp/ifile-manager/storage-stats.json`에 저장되고 읽기 전용으로 컨테이너에 마운트됩니다. 앱은 5분 이내 값만 사용합니다.
 
-## Jenkins + GitHub 자동 배포
+## Jenkins + GitHub 수동 배포
 
-Jenkins 작업 `ifile-manager-deploy`은 GitHub의 `main` 브랜치를 2분 이내 주기로 확인합니다. 새 커밋이 감지되면 해당 커밋의 `Jenkinsfile`을 읽어 **테스트 → 이미지 빌드 → 컨테이너 교체 → 헬스 체크**를 순서대로 실행합니다. 이미 배포한 커밋은 건너뜁니다. 따라서 `main`에 커밋·푸시만 하면 됩니다. Jenkins를 외부에 공개하지 않으므로 GitHub 웹훅이나 추가 Funnel 설정은 필요하지 않습니다.
+Jenkins 작업 `ifile-manager-deploy`은 자동으로 실행되지 않습니다. GitHub `main`에 원하는 코드를 커밋·푸시한 뒤 Jenkins에서 해당 작업의 **Build Now**를 누르면, 최신 `main`의 `Jenkinsfile`을 읽어 **테스트 → 이미지 빌드 → 컨테이너 교체 → 헬스 체크**를 순서대로 실행합니다. 같은 커밋도 필요하면 다시 수동 배포할 수 있습니다. Jenkins를 외부에 공개하지 않으므로 GitHub 웹훅이나 추가 Funnel 설정은 필요하지 않습니다.
 
 - Jenkins의 영구 볼륨에만 배포용 환경 파일을 `/var/jenkins_home/ifile-manager.env`로 보관합니다. 이 파일은 원격 서버의 IFileManager `.env` 사본이며 Git에 넣지 않습니다.
 - Jenkins 컨테이너는 Docker socket을 통해 이미지를 빌드하고 Compose를 실행합니다. `REMOVABLE_DISK_PATH`는 기존 원격 `.env` 값을 그대로 사용합니다.
