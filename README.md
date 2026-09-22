@@ -70,15 +70,14 @@ curl http://127.0.0.1:4300/health
 
 Tailscale IP로 HTTP 포트를 직접 열어야 한다면 `.env`에서 `PUBLIC_BIND_IP=100.x.y.z`와 `COOKIE_SECURE=false`를 함께 설정합니다. 이 경우 Docker는 해당 Tailscale 인터페이스에만 바인딩되지만, 브라우저 HTTPS는 제공되지 않습니다. HTTPS가 필요한 운영 환경에서는 Tailscale Serve 또는 역방향 프록시 구성을 권장합니다.
 
-## Jenkins + GitHub
+## Jenkins + GitHub 자동 배포
 
-1. Jenkins에 **Pipeline from SCM** 작업을 만듭니다.
-2. SCM URL로 `https://github.com/kyoungrae/IfileManager.git`를 입력하고 기본 브랜치를 선택합니다. private 저장소라면 Jenkins Credentials에 GitHub token/deploy key를 등록합니다.
-3. Script Path는 `Jenkinsfile`입니다.
-4. Jenkins 컨테이너/에이전트가 Docker socket을 사용할 수 있고 `/opt/ifile-manager/.env` 및 이동식 디스크 경로를 읽을 수 있게 설정합니다.
-5. GitHub webhook을 Jenkins의 해당 작업 URL로 등록하거나 Poll SCM을 설정합니다.
+Jenkins 작업 `ifile-manager-deploy`은 GitHub의 `main` 브랜치를 2분 이내 주기로 확인합니다. 새 커밋이 감지되면 해당 커밋의 `Jenkinsfile`을 읽어 **테스트 → 이미지 빌드 → 컨테이너 교체 → 헬스 체크**를 순서대로 실행합니다. 이미 배포한 커밋은 건너뜁니다. 따라서 `main`에 커밋·푸시만 하면 됩니다. Jenkins를 외부에 공개하지 않으므로 GitHub 웹훅이나 추가 Funnel 설정은 필요하지 않습니다.
 
-파이프라인은 테스트→이미지 빌드→`ifile-manager` Compose 프로젝트 배포 순서로 수행합니다. `.env`는 저장소나 Jenkins 콘솔에 출력되지 않으며 Git에 커밋하면 안 됩니다.
+- Jenkins의 영구 볼륨에만 배포용 환경 파일을 `/var/jenkins_home/ifile-manager.env`로 보관합니다. 이 파일은 원격 서버의 IFileManager `.env` 사본이며 Git에 넣지 않습니다.
+- Jenkins 컨테이너는 Docker socket을 통해 이미지를 빌드하고 Compose를 실행합니다. `REMOVABLE_DISK_PATH`는 기존 원격 `.env` 값을 그대로 사용합니다.
+- 실패 시 기존 컨테이너는 교체되지 않으며 Jenkins 콘솔에서 어느 단계가 실패했는지 확인할 수 있습니다.
+- 저장소가 private으로 전환되면 Jenkins 작업의 clone 단계에 GitHub 읽기 전용 Credentials를 추가해야 합니다.
 
 ## 개발 점검
 
