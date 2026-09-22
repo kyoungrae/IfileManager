@@ -9,7 +9,8 @@ def runPipeline = {
 
   timestamps {
     withEnv([
-      'COMPOSE_PROJECT_NAME=ifile-manager',
+      // Match the existing Compose project's label so Jenkins replaces its container.
+      'COMPOSE_PROJECT_NAME=ifilemanager',
       "DEPLOY_ENV_FILE=${env.JENKINS_HOME}/ifile-manager.env",
       "IMAGE_TAG=${env.BUILD_NUMBER}",
       "DEPLOY_STATE_FILE=${env.JENKINS_HOME}/ifile-manager.last-deployed-commit"
