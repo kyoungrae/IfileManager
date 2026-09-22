@@ -6,6 +6,7 @@ const state = {
   directory: { files: [] },
   folderTree: [],
   expandedFolderPaths: new Set(['']),
+  selectedFileIds: new Set(),
   fileListTransitionId: 0,
   section: 'files',
   v4Logs: { path: '', entries: [] },
@@ -23,8 +24,19 @@ const iconPaths = {
   'arrow-up': '<path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/>',
   'folder-plus': '<path d="M3 6.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v5M9.5 12.5h5"/>',
   upload: '<path d="M12 15V3M7.5 7.5 12 3l4.5 4.5"/><path d="M5 13.5v4A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-4"/>',
+  archive: '<path d="M4 7h16v13H4z"/><path d="M3 4h18v3H3zM9 11h6M9 15h6"/>',
   grid: '<rect x="4" y="4" width="6" height="6" rx=".5"/><rect x="14" y="4" width="6" height="6" rx=".5"/><rect x="4" y="14" width="6" height="6" rx=".5"/><rect x="14" y="14" width="6" height="6" rx=".5"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+  'file-pdf': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 16h2.5a1.5 1.5 0 0 0 0-3H8v5M14 13v5M14 13h2.2a1.4 1.4 0 1 1 0 2.8H14"/>',
+  'file-document': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 16h8"/>',
+  'file-sheet': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 12h8v6H8zM12 12v6M8 15h8"/>',
+  'file-image': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 17l2.6-3 2.1 2 1.8-2 1.5 3M9.5 11.5h.01"/>',
+  'file-archive': '<path d="M5 7h14v13H5zM4 4h16v3H4zM10 11h4M10 15h4"/>',
+  'file-video': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 12.5l5 3.5-5 3.5z"/>',
+  'file-audio': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M15 12v5.3a1.8 1.8 0 1 1-1.2-1.7M15 12l3-1v5.3a1.8 1.8 0 1 1-1.2-1.7"/>',
+  'file-code': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 13l-2 2 2 2M14 13l2 2-2 2"/>',
+  'file-text': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 16h8M8 19h5"/>',
   'file-up': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9.5 14.5 12 12l2.5 2.5"/>',
   'chevron-right': '<path d="m9 18 6-6-6-6"/>'
 };
@@ -83,6 +95,22 @@ function formatStorageSize(bytes) {
 function pathParts(path) { return path ? path.split('/') : []; }
 function parentPath(path = state.currentPath) { const parts = pathParts(path); parts.pop(); return parts.join('/'); }
 function nameMatches(name) { return name.toLocaleLowerCase('ko-KR').includes(state.query.toLocaleLowerCase('ko-KR')); }
+function fileIconFor(name) {
+  const fileName = String(name).trim().toLocaleLowerCase('en-US');
+  const extensionAt = fileName.lastIndexOf('.');
+  const extension = extensionAt > 0 && extensionAt < fileName.length - 1 ? fileName.slice(extensionAt + 1) : '';
+  if (['pdf'].includes(extension)) return { icon: 'file-pdf', kind: 'pdf' };
+  if (['doc', 'docx', 'odt', 'rtf', 'pages'].includes(extension)) return { icon: 'file-document', kind: 'document' };
+  if (['xls', 'xlsx', 'xlsm', 'ods', 'csv', 'tsv', 'numbers'].includes(extension)) return { icon: 'file-sheet', kind: 'sheet' };
+  if (['ppt', 'pptx', 'odp', 'key'].includes(extension)) return { icon: 'file-document', kind: 'presentation' };
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'heic', 'bmp', 'tif', 'tiff', 'avif'].includes(extension)) return { icon: 'file-image', kind: 'image' };
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'dmg', 'iso'].includes(extension)) return { icon: 'file-archive', kind: 'archive' };
+  if (['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'].includes(extension)) return { icon: 'file-video', kind: 'video' };
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'].includes(extension)) return { icon: 'file-audio', kind: 'audio' };
+  if (['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'css', 'html', 'sql', 'sh'].includes(extension)) return { icon: 'file-code', kind: 'code' };
+  if (['txt', 'md', 'log', 'json', 'xml', 'yaml', 'yml', 'ini', 'conf'].includes(extension)) return { icon: 'file-text', kind: 'text' };
+  return { icon: 'file', kind: 'generic' };
+}
 
 function renderBreadcrumbs() {
   const target = $('#breadcrumbs'); target.replaceChildren();
@@ -156,12 +184,19 @@ function folderNode(folder, depth = 0, { root = false } = {}) {
 
 function fileRow(file) {
   const row = document.createElement('article'); row.className = 'file-row'; row.setAttribute('role', 'row');
-  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.setAttribute('aria-label', `${file.name} 선택`);
-  const name = document.createElement('span'); name.className = 'file-name'; name.title = file.name; name.append(svgIcon('file-up', 'file-icon'), document.createTextNode(file.name));
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.dataset.fileId = file.id; checkbox.checked = state.selectedFileIds.has(file.id); checkbox.setAttribute('aria-label', `${file.name} 선택`);
+  row.classList.toggle('is-selected', checkbox.checked);
+  checkbox.addEventListener('change', () => {
+    state.selectedFileIds[checkbox.checked ? 'add' : 'delete'](file.id);
+    row.classList.toggle('is-selected', checkbox.checked);
+    syncFileSelectionControls();
+  });
+  const icon = fileIconFor(file.name);
+  const name = document.createElement('span'); name.className = 'file-name'; name.title = file.name; name.append(svgIcon(icon.icon, `file-icon file-icon-${icon.kind}`), document.createTextNode(file.name));
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.createdAt));
   const size = document.createElement('span'); size.className = 'file-size'; size.textContent = formatSize(file.size);
   const actions = document.createElement('div'); actions.className = 'file-actions';
-  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.textContent = '다운로드';
+  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.textContent = '다운로드';
   const remove = document.createElement('button'); remove.className = 'delete-file'; remove.type = 'button'; remove.setAttribute('aria-label', `${file.name} 삭제`); remove.title = '삭제'; remove.append(svgIcon('trash'));
   remove.addEventListener('click', () => openFileDeleteDialog(file));
   actions.append(download, remove);
@@ -170,12 +205,37 @@ function fileRow(file) {
 
 function fileTableHeader() {
   const row = document.createElement('article'); row.className = 'file-row file-header'; row.setAttribute('role', 'row');
-  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.disabled = true; checkbox.setAttribute('aria-label', '전체 파일 선택');
+  const checkbox = document.createElement('input'); checkbox.id = 'select-all-files'; checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.setAttribute('aria-label', '표시된 파일 전체 선택');
+  checkbox.addEventListener('change', () => {
+    const visibleFiles = state.directory.files.filter((file) => nameMatches(file.name));
+    visibleFiles.forEach((file) => state.selectedFileIds[checkbox.checked ? 'add' : 'delete'](file.id));
+    document.querySelectorAll('#file-list .file-checkbox[data-file-id]').forEach((item) => {
+      item.checked = checkbox.checked;
+      item.closest('.file-row')?.classList.toggle('is-selected', checkbox.checked);
+    });
+    syncFileSelectionControls();
+  });
   const name = document.createElement('span'); name.textContent = '이름';
   const modified = document.createElement('span'); modified.textContent = '수정한 날짜';
   const size = document.createElement('span'); size.textContent = '크기';
   const actions = document.createElement('span'); actions.textContent = '작업';
   row.append(checkbox, name, modified, size, actions); return row;
+}
+
+function syncFileSelectionControls() {
+  const visibleFiles = state.directory.files.filter((file) => nameMatches(file.name));
+  const selectedVisibleCount = visibleFiles.filter((file) => state.selectedFileIds.has(file.id)).length;
+  const selectAll = $('#select-all-files');
+  if (selectAll) {
+    selectAll.disabled = !visibleFiles.length;
+    selectAll.checked = visibleFiles.length > 0 && selectedVisibleCount === visibleFiles.length;
+    selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleFiles.length;
+  }
+  const button = $('#bulk-download-button');
+  const count = state.selectedFileIds.size;
+  button.hidden = count === 0;
+  button.disabled = count === 0;
+  $('#bulk-download-label').textContent = `선택 파일 ${count}개 ZIP 다운로드`;
 }
 
 function emptyFolder() {
@@ -232,6 +292,7 @@ async function renderFileList({ animate = false } = {}) {
   fileList.replaceChildren(...(files.length ? [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
   $('#file-count').textContent = `${files.length}개`;
   $('#files-title').textContent = `${pathParts(state.currentPath).at(-1) ?? '내 파일'}의 파일`;
+  syncFileSelectionControls();
   if (animate) window.requestAnimationFrame(() => {
     if (transitionId === state.fileListTransitionId) fileList.classList.remove('is-changing');
   });
@@ -250,7 +311,8 @@ function v4LogTableHeader() {
 
 function v4LogRow(entry) {
   const row = document.createElement('article'); row.className = 'file-row v4-log-row'; row.setAttribute('role', 'row');
-  const type = svgIcon(entry.type === 'directory' ? 'folder' : 'file-up', 'v4-log-type');
+  const icon = entry.type === 'directory' ? null : fileIconFor(entry.name);
+  const type = svgIcon(entry.type === 'directory' ? 'folder' : icon.icon, `v4-log-type${icon ? ` file-icon-${icon.kind}` : ''}`);
   const name = document.createElement(entry.type === 'directory' ? 'button' : 'span'); name.className = `file-name${entry.type === 'directory' ? ' v4-log-folder' : ''}`; name.append(document.createTextNode(entry.name));
   if (entry.type === 'directory') { name.type = 'button'; name.addEventListener('click', () => loadV4Logs(entry.path)); }
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.modifiedAt));
@@ -259,7 +321,7 @@ function v4LogRow(entry) {
   if (entry.type === 'directory') {
     const open = document.createElement('button'); open.className = 'log-open'; open.type = 'button'; open.textContent = '열기'; open.addEventListener('click', () => loadV4Logs(entry.path)); actions.append(open);
   } else {
-    const download = document.createElement('a'); download.className = 'download'; download.href = `/api/v4-logs/download?${new URLSearchParams({ path: entry.path })}`; download.textContent = '다운로드'; actions.append(download);
+    const download = document.createElement('a'); download.className = 'download'; download.href = `/api/v4-logs/download?${new URLSearchParams({ path: entry.path })}`; download.download = entry.name; download.textContent = '다운로드'; actions.append(download);
   }
   row.append(type, name, metadata, size, actions); return row;
 }
@@ -350,6 +412,8 @@ async function loadFolder(path = state.currentPath, { animate = true } = {}) {
     state.currentPath = data.path;
     expandFolderAncestors(data.path);
     state.directory = { files: data.files };
+    const availableIds = new Set(data.files.map((file) => file.id));
+    state.selectedFileIds = new Set([...state.selectedFileIds].filter((id) => availableIds.has(id)));
     renderBreadcrumbs(); await renderFileList({ animate });
     syncFolderTreeState();
     setStatus('');
@@ -464,6 +528,20 @@ async function refreshStorageAfterMutation() {
   [700, 2_000].forEach((delay) => window.setTimeout(() => { void loadStorage(); }, delay));
 }
 
+function downloadSelectedFilesAsZip() {
+  const ids = [...state.selectedFileIds];
+  if (!ids.length) return;
+  const form = document.createElement('form');
+  form.method = 'POST'; form.action = '/api/files/archive'; form.target = 'zip-download-target'; form.hidden = true;
+  ids.forEach((id) => {
+    const input = document.createElement('input'); input.type = 'hidden'; input.name = 'fileIds'; input.value = id;
+    form.append(input);
+  });
+  document.body.append(form);
+  form.submit(); form.remove();
+  setStatus(`${ids.length}개 파일을 ZIP으로 준비해 다운로드합니다.`);
+}
+
 function attachUploadDropzone(panel) {
   ['dragenter', 'dragover'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.add('dragover'); }));
   ['dragleave', 'drop'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.remove('dragover'); }));
@@ -495,6 +573,7 @@ $('#new-folder-button').addEventListener('click', openFolderDialog);
 $('#collapse-folders-button').addEventListener('click', () => setAllFoldersExpanded(!state.expandedFolderPaths.has('')));
 $('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); if (state.section === 'v4log') renderV4LogList(); else renderFileList(); });
 $('#file-input').addEventListener('change', async (event) => { await uploadSelectedFiles(event.target.files); event.target.value = ''; });
+$('#bulk-download-button').addEventListener('click', downloadSelectedFilesAsZip);
 
 document.querySelectorAll('dialog button[value="cancel"]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 document.querySelectorAll('.side-nav-item').forEach((button) => button.addEventListener('click', () => {

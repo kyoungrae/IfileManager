@@ -11,6 +11,7 @@ import multer from 'multer';
 import { config } from './config.js';
 import { decryptFile, encryptFile, indexFor, open, seal } from './crypto.js';
 import { AuditLog, ManagedFile, ManagedFolder } from './models.js';
+import { writeStoredZip } from './zip.js';
 import {
   authenticate, bootstrapAdmin, clearSession, createUser, issueReauthentication,
   requireAdmin, requireAppRequest, requireAuth, setSession, verifyReauthentication
@@ -36,6 +37,7 @@ app.use(helmet({
   contentSecurityPolicy: { directives: contentSecurityPolicy }
 }));
 app.use(express.json({ limit: '64kb' }));
+app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 app.use(cookieParser());
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } });
@@ -63,6 +65,28 @@ function managedFilename(name) {
   if (!/[\u0080-\u009f\u00c0-\u00ff]/.test(source)) return clientFilename(source);
   const decoded = Buffer.from(source, 'latin1').toString('utf8');
   return clientFilename(decoded.includes('\uFFFD') ? source : decoded);
+}
+
+function forceDownload(response, name, size) {
+  // Set attachment first: Express infers a previewable MIME type from the name.
+  // Override it afterwards so browsers cannot render the downloaded file inline.
+  response.attachment(name);
+  const headers = {
+    'Content-Type': 'application/octet-stream',
+    'Cache-Control': 'no-store, private',
+    'X-Content-Type-Options': 'nosniff'
+  };
+  if (Number.isSafeInteger(size) && size >= 0) headers['Content-Length'] = String(size);
+  response.set(headers);
+}
+
+function selectedFileIds(input) {
+  const values = Array.isArray(input) ? input : [input];
+  const ids = [...new Set(values)];
+  if (!ids.length || ids.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+    throw new Error('Select at least one valid file');
+  }
+  return ids;
 }
 
 function parentRelativePath(relativePath) {
@@ -184,8 +208,7 @@ app.get('/api/v4-logs/download', requireAuth, asyncRoute(async (request, respons
   const target = await existingV4LogEntry(request.query.path);
   if (!target.stat.isFile()) return response.status(400).json({ error: 'V4 log path is not a file' });
   const name = clientFilename(path.basename(target.absolutePath));
-  response.set({ 'Content-Type': 'application/octet-stream', 'Content-Length': String(target.stat.size), 'Cache-Control': 'no-store' });
-  response.attachment(name);
+  forceDownload(response, name, target.stat.size);
   await audit(request.user.id, 'v4-log.download', target.normalized, { bytes: target.stat.size });
   createReadStream(target.absolutePath).on('error', next).pipe(response);
 }));
@@ -392,10 +415,38 @@ app.get('/api/files/:fileId/download', requireAuth, asyncRoute(async (request, r
   const file = await ManagedFile.findOne({ fileId: request.params.fileId }).lean();
   if (!file) return response.status(404).json({ error: 'File not found' });
   const name = managedFilename(open(file.nameEncrypted));
-  response.set({ 'Content-Type': open(file.mimeEncrypted), 'Content-Length': String(file.size), 'Cache-Control': 'no-store' });
-  response.attachment(name);
+  forceDownload(response, name, file.size);
   await audit(request.user.id, 'file.download', name, { fileId: file.fileId });
   await decryptFile(filePathFor(file.storageId), response);
+}));
+
+// Native form submission lets the browser stream a large ZIP directly to its
+// download manager. The session cookie is SameSite=Strict, so this endpoint
+// cannot be submitted by a third-party site with the user's session.
+app.post('/api/files/archive', requireAuth, asyncRoute(async (request, response) => {
+  const requestedIds = selectedFileIds(request.body?.fileIds);
+  const records = await ManagedFile.find({ fileId: { $in: requestedIds } }).lean();
+  if (records.length !== requestedIds.length) return response.status(404).json({ error: 'One or more selected files no longer exist' });
+  const byId = new Map(records.map((file) => [file.fileId, file]));
+  const files = requestedIds.map((id) => byId.get(id));
+  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+
+  await audit(request.user.id, 'file.download_zip', `${files.length} files`, { fileIds: requestedIds, bytes: totalBytes });
+  forceDownload(response, 'ifile-manager-files.zip');
+  try {
+    await writeStoredZip(response, files.map((file) => ({
+      name: managedFilename(open(file.nameEncrypted)),
+      size: file.size,
+      modifiedAt: file.createdAt,
+      writeContents: (destination) => decryptFile(filePathFor(file.storageId), destination)
+    })));
+  } catch (error) {
+    if (response.headersSent) {
+      response.destroy(error);
+      return;
+    }
+    throw error;
+  }
 }));
 
 app.use('/api', (_request, response) => response.status(404).json({ error: 'Not found' }));
