@@ -224,8 +224,14 @@ async function uploadSelectedFile(file) {
   if (!file) return;
   const data = new FormData(); data.append('folderPath', state.currentPath); data.append('file', file);
   setStatus(`“${file.name}” 암호화 후 업로드 중…`);
-  try { await request('/api/files', { method: 'POST', body: data }); await loadFolder(); await loadStorage(); setStatus('파일을 암호화하여 업로드했습니다.'); }
+  try { await request('/api/files', { method: 'POST', body: data }); await loadFolder(); await refreshStorageAfterMutation(); setStatus('파일을 암호화하여 업로드했습니다.'); }
   catch (error) { setStatus(error.message, true); }
+}
+
+async function refreshStorageAfterMutation() {
+  await loadStorage();
+  // macOS WatchPaths starts the host collector asynchronously after Docker syncs the change.
+  [700, 2_000].forEach((delay) => window.setTimeout(() => { void loadStorage(); }, delay));
 }
 
 function attachUploadDropzone(panel) {
@@ -277,7 +283,7 @@ $('#delete-form').addEventListener('submit', async (event) => {
   try {
     const confirmation = await request('/api/auth/reauthenticate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#delete-password').value }) });
     await request('/api/folders', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: state.pendingDeletePath, reauthenticationToken: confirmation.token }) });
-    $('#delete-dialog').close(); await loadFolder(); await loadStorage(); setStatus('폴더와 그 안의 파일을 삭제했습니다.');
+    $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus('폴더와 그 안의 파일을 삭제했습니다.');
   } catch (error) { $('#delete-error').textContent = error.message; } finally { button.disabled = false; }
 });
 

@@ -72,7 +72,7 @@ Tailscale IP로 HTTP 포트를 직접 열어야 한다면 `.env`에서 `PUBLIC_B
 
 ### 실제 이동식 디스크 용량 표시 (macOS)
 
-Docker Desktop은 컨테이너에서 이동식 디스크의 실제 용량 대신 가상 디스크 용량을 반환합니다. 호스트의 `df` 값을 1분마다 기록하는 LaunchAgent를 한 번 설치하면, 저장소 카드는 실제 전체·사용·여유 공간을 표시합니다.
+Docker Desktop은 컨테이너에서 이동식 디스크의 실제 용량 대신 가상 디스크 용량을 반환합니다. 호스트의 `df` 값을 기록하는 LaunchAgent를 한 번 설치하면, 저장소 카드는 실제 전체·사용·여유 공간을 표시합니다. 이 에이전트는 상시 실행하지 않으며 관리 파일의 업로드·삭제로 `files` 또는 `storage` 폴더가 변경될 때만 동작합니다.
 
 ```sh
 cd /Users/ikyoungtae/git/IfileManager
