@@ -7,11 +7,43 @@ export const storageRoot = path.join(config.dataRoot, 'storage');
 export const fileRoot = path.join(config.dataRoot, 'files');
 export const tempRoot = path.join(config.dataRoot, '.ifile-manager-tmp');
 export const trashRoot = path.join(config.dataRoot, '.ifile-manager-trash');
+export const hostStorageStatsPath = path.join(config.dataRoot, '.storage-stats.json');
+
+const storageStatsMaxAgeMs = 5 * 60 * 1000;
 
 const folderName = /^[\p{L}\p{N}][\p{L}\p{N} ._()\-]{0,119}$/u;
 
 export async function initializeStorage() {
   await Promise.all([storageRoot, fileRoot, tempRoot, trashRoot].map((directory) => fs.mkdir(directory, { recursive: true, mode: 0o700 })));
+}
+
+function isByteCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validHostStorageStats(stats) {
+  const updatedAt = Date.parse(stats?.updatedAt);
+  return isByteCount(stats?.totalBytes)
+    && isByteCount(stats?.usedBytes)
+    && isByteCount(stats?.freeBytes)
+    && stats.usedBytes + stats.freeBytes === stats.totalBytes
+    && Number.isFinite(updatedAt)
+    && Date.now() - updatedAt <= storageStatsMaxAgeMs;
+}
+
+// Docker Desktop reports its virtual disk for statfs() on macOS bind mounts. A tiny host
+// LaunchAgent writes the real removable-volume values to this file once per minute.
+export async function storageUsage() {
+  try {
+    const hostStats = JSON.parse(await fs.readFile(hostStorageStatsPath, 'utf8'));
+    if (validHostStorageStats(hostStats)) return { ...hostStats, source: 'host-volume' };
+  } catch { /* The host agent may not be installed yet; use a safe fallback. */ }
+
+  const stats = await fs.statfs(storageRoot);
+  const blockSize = Number(stats.bsize);
+  const totalBytes = blockSize * Number(stats.blocks);
+  const freeBytes = blockSize * Number(stats.bavail);
+  return { totalBytes, freeBytes, usedBytes: Math.max(0, totalBytes - freeBytes), source: 'container-filesystem' };
 }
 
 export function validateFolderName(name) {

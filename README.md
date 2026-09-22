@@ -70,6 +70,18 @@ curl http://127.0.0.1:4300/health
 
 Tailscale IP로 HTTP 포트를 직접 열어야 한다면 `.env`에서 `PUBLIC_BIND_IP=100.x.y.z`와 `COOKIE_SECURE=false`를 함께 설정합니다. 이 경우 Docker는 해당 Tailscale 인터페이스에만 바인딩되지만, 브라우저 HTTPS는 제공되지 않습니다. HTTPS가 필요한 운영 환경에서는 Tailscale Serve 또는 역방향 프록시 구성을 권장합니다.
 
+### 실제 이동식 디스크 용량 표시 (macOS)
+
+Docker Desktop은 컨테이너에서 이동식 디스크의 실제 용량 대신 가상 디스크 용량을 반환합니다. 호스트의 `df` 값을 1분마다 기록하는 LaunchAgent를 한 번 설치하면, 저장소 카드는 실제 전체·사용·여유 공간을 표시합니다.
+
+```sh
+cd /Users/ikyoungtae/git/IfileManager
+git pull --ff-only
+sh scripts/install-storage-stats-agent.sh
+```
+
+설치 스크립트는 `.env`에서 `REMOVABLE_DISK_PATH`만 읽으며 다른 비밀값은 읽거나 출력하지 않습니다. 갱신 파일은 이동식 디스크의 `ifile-manager/.storage-stats.json`에 저장되고, 앱은 5분 이내 값만 사용합니다.
+
 ## Jenkins + GitHub 자동 배포
 
 Jenkins 작업 `ifile-manager-deploy`은 GitHub의 `main` 브랜치를 2분 이내 주기로 확인합니다. 새 커밋이 감지되면 해당 커밋의 `Jenkinsfile`을 읽어 **테스트 → 이미지 빌드 → 컨테이너 교체 → 헬스 체크**를 순서대로 실행합니다. 이미 배포한 커밋은 건너뜁니다. 따라서 `main`에 커밋·푸시만 하면 됩니다. Jenkins를 외부에 공개하지 않으므로 GitHub 웹훅이나 추가 Funnel 설정은 필요하지 않습니다.

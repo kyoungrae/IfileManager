@@ -106,7 +106,7 @@ button.danger { background: var(--danger); }
 .folder-open { display: flex; flex: 1; align-items: center; min-width: 0; gap: .7rem; padding: .25rem; background: transparent; color: var(--ink); text-align: left; box-shadow: none; }
 .folder-open:hover { box-shadow: none; }
 .folder-icon { display: grid; place-items: center; width: 38px; height: 34px; color: #4f88f4; }
-.folder-icon svg { width: 38px; height: 34px; fill: #b9d0ff; stroke: #7ca8f6; stroke-width: 1.4; }
+.folder-icon svg { width: 38px; height: 34px; fill: #9fc2ff; stroke: #8aaff1; stroke-width: .7; filter: drop-shadow(0 3px 2px #5c8edb2e); }
 .item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; font-weight: 720; }
 .delete-folder { padding: .35rem .48rem; border-radius: 7px; color: var(--danger); background: #fff1f3; font-size: .76rem; box-shadow: none; }
 

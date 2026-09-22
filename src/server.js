@@ -16,7 +16,7 @@ import {
 } from './auth.js';
 import {
   ROOT_PATH_KEY, collectDirectoryPaths, existingDirectory, fileRoot, initializeStorage,
-  normalizeRelativePath, relativeChild, storageRoot, tempRoot, trashRoot, validateFolderName
+  normalizeRelativePath, relativeChild, storageUsage, tempRoot, trashRoot, validateFolderName
 } from './storage.js';
 
 const app = express();
@@ -87,15 +87,7 @@ app.post('/api/auth/logout', requireAppRequest, requireAuth, asyncRoute(async (r
 app.get('/api/auth/me', requireAuth, (request, response) => response.json({ user: apiUser(request.user) }));
 
 app.get('/api/storage', requireAuth, asyncRoute(async (_request, response) => {
-  const stats = await fs.statfs(storageRoot);
-  const blockSize = Number(stats.bsize);
-  const totalBytes = blockSize * Number(stats.blocks);
-  const freeBytes = blockSize * Number(stats.bavail);
-  response.json({
-    totalBytes,
-    freeBytes,
-    usedBytes: Math.max(0, totalBytes - freeBytes)
-  });
+  response.json(await storageUsage());
 }));
 
 app.post('/api/users', requireAppRequest, requireAuth, requireAdmin, asyncRoute(async (request, response) => {
