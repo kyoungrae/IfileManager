@@ -22,7 +22,18 @@ import {
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'"], scriptSrc: ["'self'"], imgSrc: ["'self'", 'data:'] } } }));
+const contentSecurityPolicy = {
+  defaultSrc: ["'self'"],
+  styleSrc: ["'self'"],
+  scriptSrc: ["'self'"],
+  imgSrc: ["'self'", 'data:'],
+  // Direct Tailscale-IP mode is HTTP. Do not rewrite its relative static assets to HTTPS.
+  ...(config.cookieSecure ? {} : { upgradeInsecureRequests: null })
+};
+app.use(helmet({
+  strictTransportSecurity: config.cookieSecure ? undefined : false,
+  contentSecurityPolicy: { directives: contentSecurityPolicy }
+}));
 app.use(express.json({ limit: '64kb' }));
 app.use(cookieParser());
 
