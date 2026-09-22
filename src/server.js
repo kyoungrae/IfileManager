@@ -86,6 +86,18 @@ app.post('/api/auth/logout', requireAppRequest, requireAuth, asyncRoute(async (r
 
 app.get('/api/auth/me', requireAuth, (request, response) => response.json({ user: apiUser(request.user) }));
 
+app.get('/api/storage', requireAuth, asyncRoute(async (_request, response) => {
+  const stats = await fs.statfs(storageRoot);
+  const blockSize = Number(stats.bsize);
+  const totalBytes = blockSize * Number(stats.blocks);
+  const freeBytes = blockSize * Number(stats.bavail);
+  response.json({
+    totalBytes,
+    freeBytes,
+    usedBytes: Math.max(0, totalBytes - freeBytes)
+  });
+}));
+
 app.post('/api/users', requireAppRequest, requireAuth, requireAdmin, asyncRoute(async (request, response) => {
   const user = await createUser(request.body ?? {});
   await audit(request.user.id, 'user.create', user.id, { role: user.role });

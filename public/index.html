@@ -10,9 +10,10 @@
   <body>
     <main class="shell">
       <section id="login-panel" class="auth-card" aria-labelledby="login-title">
+        <div class="auth-mark" aria-hidden="true">IF</div>
         <p class="eyebrow">PRIVATE STORAGE</p>
-        <h1 id="login-title">IFile Manager</h1>
-        <p class="subtle">암호화된 이동식 디스크 파일 관리</p>
+        <h1 id="login-title">파일 관리자</h1>
+        <p class="subtle">암호화된 이동식 디스크에 안전하게 파일을 보관합니다.</p>
         <form id="login-form">
           <label>사용자 이름<input name="username" autocomplete="username" minlength="3" required></label>
           <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
@@ -21,53 +22,57 @@
         </form>
       </section>
 
-      <section id="app-panel" hidden>
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">ENCRYPTED REMOVABLE DISK</p>
-            <h1>IFile Manager</h1>
-          </div>
-          <div class="account"><span id="current-user"></span><button class="quiet" id="logout-button">로그아웃</button></div>
-        </header>
+      <section id="app-panel" class="app-layout" hidden>
+        <aside class="sidebar" aria-label="파일 탐색">
+          <div class="brand"><h1>파일 관리자</h1><p>암호화된 이동식 디스크</p></div>
+          <nav class="side-nav" aria-label="주요 메뉴">
+            <button class="side-nav-item active" type="button" aria-current="page" data-nav="files"><span class="nav-icon" data-icon="folder"></span>내 파일</button>
+            <button class="side-nav-item" type="button" data-nav="shared"><span class="nav-icon" data-icon="users"></span>공유됨</button>
+            <button class="side-nav-item" type="button" data-nav="recent"><span class="nav-icon" data-icon="clock"></span>최근 항목</button>
+            <button class="side-nav-item" type="button" data-nav="trash"><span class="nav-icon" data-icon="trash"></span>휴지통</button>
+          </nav>
+          <section class="storage-mini" aria-label="저장소 요약">
+            <h2>저장소</h2><div class="progress"><span id="mini-storage-progress"></span></div><p>남은 저장 공간</p><strong id="mini-storage-value">확인 중…</strong>
+          </section>
+        </aside>
 
-        <section class="toolbar" aria-label="파일 도구">
-          <nav id="breadcrumbs" aria-label="현재 폴더"></nav>
-          <div class="toolbar-actions">
-            <button class="quiet" id="up-button">상위 폴더</button>
-            <button id="new-folder-button">새 폴더</button>
-            <label class="upload-button">파일 업로드<input id="file-input" type="file"></label>
+        <section class="workspace">
+          <header class="topbar">
+            <div class="page-title"><span id="page-location">내 파일</span><span class="title-chevron" aria-hidden="true">›</span></div>
+            <div class="account"><span id="current-user"></span><button class="quiet" id="logout-button" type="button">로그아웃</button></div>
+          </header>
+          <div class="workspace-body">
+            <section class="toolbar" aria-label="파일 도구">
+              <label class="search-box"><span data-icon="search" aria-hidden="true"></span><input id="file-search" type="search" placeholder="파일명으로 검색하세요." autocomplete="off"></label>
+              <div class="toolbar-actions">
+                <button class="quiet icon-button" id="up-button" type="button"><span data-icon="arrow-up" aria-hidden="true"></span><span>상위 폴더</span></button>
+                <button class="outline-button" id="new-folder-button" type="button"><span data-icon="folder-plus" aria-hidden="true"></span><span>새 폴더</span></button>
+                <label class="upload-button"><span data-icon="upload" aria-hidden="true"></span><span>파일 업로드</span><input id="file-input" type="file"></label>
+                <div class="view-switch" role="group" aria-label="보기 방식">
+                  <button class="view-button active" id="grid-view-button" type="button" aria-label="격자 보기" aria-pressed="true"><span data-icon="grid" aria-hidden="true"></span></button>
+                  <button class="view-button" id="list-view-button" type="button" aria-label="목록 보기" aria-pressed="false"><span data-icon="list" aria-hidden="true"></span></button>
+                </div>
+              </div>
+            </section>
+            <p id="status" class="status" role="status"></p>
+            <nav id="breadcrumbs" class="breadcrumbs" aria-label="현재 폴더"></nav>
+            <div class="library-layout" aria-live="polite">
+              <section class="content-section folder-section"><div class="section-heading"><h2>폴더</h2><span id="folder-count">0개</span></div><div id="folder-list" class="item-grid"></div></section>
+              <aside class="storage-card" aria-label="저장소 상세">
+                <h2>저장소</h2>
+                <div class="storage-overview"><div class="storage-ring" id="storage-ring"><strong id="storage-percent">–</strong></div><div><p>남은 저장 공간</p><strong id="storage-free">확인 중…</strong><small id="storage-total">/ –</small></div></div>
+                <div class="storage-divider"></div>
+                <dl class="storage-legend"><div><dt><span class="legend-dot used"></span>사용된 공간</dt><dd id="storage-used">–</dd></div><div><dt><span class="legend-dot free"></span>남은 저장 공간</dt><dd id="storage-free-detail">–</dd></div></dl>
+              </aside>
+            </div>
+            <section class="content-section files-section" aria-live="polite"><div class="section-heading"><h2>파일</h2><span id="file-count">0개</span></div><div id="file-list" class="file-list"></div></section>
           </div>
-        </section>
-        <p id="status" class="status" role="status"></p>
-        <section class="content" aria-live="polite">
-          <div class="section-heading"><h2>폴더</h2><span id="folder-count"></span></div>
-          <div id="folder-list" class="item-grid"></div>
-          <div class="section-heading files-heading"><h2>파일</h2><span id="file-count"></span></div>
-          <div id="file-list" class="file-list"></div>
         </section>
       </section>
     </main>
 
-    <dialog id="folder-dialog">
-      <form method="dialog" id="folder-form">
-        <h2>새 폴더</h2>
-        <label>폴더 이름<input id="folder-name" maxlength="120" required autofocus></label>
-        <p class="subtle">한글·영문·숫자와 공백, 점, 밑줄, 괄호, 하이픈을 사용할 수 있습니다.</p>
-        <p id="folder-error" class="form-error" role="alert"></p>
-        <div class="dialog-actions"><button value="cancel" class="quiet">취소</button><button id="folder-submit" value="default">만들기</button></div>
-      </form>
-    </dialog>
-
-    <dialog id="delete-dialog">
-      <form method="dialog" id="delete-form">
-        <p class="danger-label">삭제 확인</p>
-        <h2 id="delete-title">폴더를 삭제할까요?</h2>
-        <p class="subtle">하위 폴더와 파일도 함께 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.</p>
-        <label>현재 비밀번호<input id="delete-password" type="password" autocomplete="current-password" required></label>
-        <p id="delete-error" class="form-error" role="alert"></p>
-        <div class="dialog-actions"><button value="cancel" class="quiet">취소</button><button id="delete-submit" class="danger" value="default">영구 삭제</button></div>
-      </form>
-    </dialog>
+    <dialog id="folder-dialog"><form method="dialog" id="folder-form"><p class="dialog-eyebrow">새 폴더</p><h2>폴더를 만들까요?</h2><label>폴더 이름<input id="folder-name" maxlength="120" required autofocus></label><p class="subtle">한글·영문·숫자와 공백, 점, 밑줄, 괄호, 하이픈을 사용할 수 있습니다.</p><p id="folder-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="folder-submit" value="default">만들기</button></div></form></dialog>
+    <dialog id="delete-dialog"><form method="dialog" id="delete-form"><p class="danger-label">삭제 확인</p><h2 id="delete-title">폴더를 삭제할까요?</h2><p class="subtle">하위 폴더와 파일도 함께 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.</p><label>현재 비밀번호<input id="delete-password" type="password" autocomplete="current-password" required></label><p id="delete-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="delete-submit" class="danger" value="default">영구 삭제</button></div></form></dialog>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
