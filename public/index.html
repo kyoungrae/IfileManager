@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>IFile Manager</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section id="login-panel" class="auth-card" aria-labelledby="login-title">
+        <p class="eyebrow">PRIVATE STORAGE</p>
+        <h1 id="login-title">IFile Manager</h1>
+        <p class="subtle">암호화된 이동식 디스크 파일 관리</p>
+        <form id="login-form">
+          <label>사용자 이름<input name="username" autocomplete="username" minlength="3" required></label>
+          <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
+          <button type="submit">로그인</button>
+          <p class="form-error" id="login-error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="app-panel" hidden>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">ENCRYPTED REMOVABLE DISK</p>
+            <h1>IFile Manager</h1>
+          </div>
+          <div class="account"><span id="current-user"></span><button class="quiet" id="logout-button">로그아웃</button></div>
+        </header>
+
+        <section class="toolbar" aria-label="파일 도구">
+          <nav id="breadcrumbs" aria-label="현재 폴더"></nav>
+          <div class="toolbar-actions">
+            <button class="quiet" id="up-button">상위 폴더</button>
+            <button id="new-folder-button">새 폴더</button>
+            <label class="upload-button">파일 업로드<input id="file-input" type="file"></label>
+          </div>
+        </section>
+        <p id="status" class="status" role="status"></p>
+        <section class="content" aria-live="polite">
+          <div class="section-heading"><h2>폴더</h2><span id="folder-count"></span></div>
+          <div id="folder-list" class="item-grid"></div>
+          <div class="section-heading files-heading"><h2>파일</h2><span id="file-count"></span></div>
+          <div id="file-list" class="file-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="folder-dialog">
+      <form method="dialog" id="folder-form">
+        <h2>새 폴더</h2>
+        <label>폴더 이름<input id="folder-name" maxlength="120" required autofocus></label>
+        <p class="subtle">한글·영문·숫자와 공백, 점, 밑줄, 괄호, 하이픈을 사용할 수 있습니다.</p>
+        <p id="folder-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button value="cancel" class="quiet">취소</button><button id="folder-submit" value="default">만들기</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="delete-dialog">
+      <form method="dialog" id="delete-form">
+        <p class="danger-label">삭제 확인</p>
+        <h2 id="delete-title">폴더를 삭제할까요?</h2>
+        <p class="subtle">하위 폴더와 파일도 함께 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.</p>
+        <label>현재 비밀번호<input id="delete-password" type="password" autocomplete="current-password" required></label>
+        <p id="delete-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button value="cancel" class="quiet">취소</button><button id="delete-submit" class="danger" value="default">영구 삭제</button></div>
+      </form>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
