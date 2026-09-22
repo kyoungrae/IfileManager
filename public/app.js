@@ -318,9 +318,7 @@ function v4LogRow(entry) {
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.modifiedAt));
   const size = document.createElement('span'); size.className = 'file-size'; size.textContent = entry.type === 'directory' ? '폴더' : formatSize(entry.size);
   const actions = document.createElement('div'); actions.className = 'file-actions';
-  if (entry.type === 'directory') {
-    const open = document.createElement('button'); open.className = 'log-open'; open.type = 'button'; open.textContent = '열기'; open.addEventListener('click', () => loadV4Logs(entry.path)); actions.append(open);
-  } else {
+  if (entry.type !== 'directory') {
     const download = document.createElement('a'); download.className = 'download'; download.href = `/api/v4-logs/download?${new URLSearchParams({ path: entry.path })}`; download.download = entry.name; download.textContent = '다운로드'; actions.append(download);
   }
   row.append(type, name, metadata, size, actions); return row;
@@ -336,8 +334,7 @@ function v4LogParentRow() {
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = '상위 폴더';
   const size = document.createElement('span'); size.className = 'file-size'; size.textContent = '–';
   const actions = document.createElement('div'); actions.className = 'file-actions';
-  const open = document.createElement('button'); open.className = 'log-open'; open.type = 'button'; open.textContent = '열기'; open.addEventListener('click', () => loadV4Logs(parent));
-  actions.append(open); row.append(type, name, metadata, size, actions); return row;
+  row.append(type, name, metadata, size, actions); return row;
 }
 
 function emptyV4Logs() {
