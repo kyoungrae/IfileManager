@@ -42,7 +42,7 @@ def runPipeline = {
         stage('Deploy') {
         sh '''#!/bin/sh
           set -eu
-          docker compose --env-file "$DEPLOY_ENV_FILE" up -d --no-build --remove-orphans --wait
+          docker compose --env-file "$DEPLOY_ENV_FILE" up -d --no-build --force-recreate --remove-orphans --wait
           docker compose --env-file "$DEPLOY_ENV_FILE" ps
         '''
       }
