@@ -230,6 +230,26 @@ app.post('/api/files', requireAppRequest, requireAuth, upload.single('file'), as
   }
 }));
 
+app.delete('/api/files/:fileId', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
+  if (!verifyReauthentication(request.body?.reauthenticationToken, request.user.id)) return response.status(401).json({ error: 'Password confirmation has expired or is invalid' });
+  const file = await ManagedFile.findOne({ fileId: request.params.fileId }).lean();
+  if (!file) return response.status(404).json({ error: 'File not found' });
+
+  const encryptedPath = filePathFor(file.storageId);
+  const trashPath = path.join(trashRoot, `${crypto.randomUUID()}-deleted-file`);
+  await fs.rename(encryptedPath, trashPath);
+  try {
+    await audit(request.user.id, 'file.delete', open(file.nameEncrypted), { fileId: file.fileId, bytes: file.size });
+    const deletion = await ManagedFile.deleteOne({ _id: file._id });
+    if (deletion.deletedCount !== 1) throw new Error('File metadata could not be deleted');
+  } catch (error) {
+    await fs.rename(trashPath, encryptedPath).catch(() => undefined);
+    throw error;
+  }
+  await fs.unlink(trashPath);
+  response.status(204).end();
+}));
+
 app.get('/api/files/:fileId/download', requireAuth, asyncRoute(async (request, response) => {
   const file = await ManagedFile.findOne({ fileId: request.params.fileId }).lean();
   if (!file) return response.status(404).json({ error: 'File not found' });

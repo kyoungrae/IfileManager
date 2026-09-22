@@ -1,10 +1,11 @@
 const state = {
   user: null,
   currentPath: '',
-  pendingDeletePath: '',
+  pendingDelete: null,
   directory: { files: [] },
   folderTree: [],
   expandedFolderPaths: new Set(['']),
+  fileListTransitionId: 0,
   query: '',
   view: 'grid'
 };
@@ -116,13 +117,13 @@ function folderNode(folder, depth = 0, { root = false } = {}) {
   toggle.append(chevron);
   toggle.addEventListener('click', () => setFolderExpanded(folder.path, !state.expandedFolderPaths.has(folder.path)));
 
-  const open = document.createElement('button'); open.className = 'folder-open'; open.type = 'button'; open.title = folder.name;
+  const open = document.createElement('button'); open.className = 'folder-open'; open.type = 'button';
   const icon = svgIcon('folder', 'folder-icon');
   const name = document.createElement('span'); name.className = 'item-name'; name.textContent = folder.name;
   open.append(icon, name); open.addEventListener('click', () => loadFolder(folder.path));
   row.append(toggle, open);
   if (!root) {
-    const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.textContent = '삭제'; remove.addEventListener('click', () => openDeleteDialog(folder));
+    const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.textContent = '삭제'; remove.addEventListener('click', () => openFolderDeleteDialog(folder));
     row.append(remove);
   }
 
@@ -140,13 +141,17 @@ function fileRow(file) {
   const name = document.createElement('span'); name.className = 'file-name'; name.title = file.name; name.append(svgIcon('file-up', 'file-icon'), document.createTextNode(file.name));
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.createdAt));
   const size = document.createElement('span'); size.className = 'file-size'; size.textContent = formatSize(file.size);
+  const actions = document.createElement('div'); actions.className = 'file-actions';
   const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.textContent = '다운로드';
-  row.append(checkbox, name, metadata, size, download); return row;
+  const remove = document.createElement('button'); remove.className = 'delete-file'; remove.type = 'button'; remove.setAttribute('aria-label', `${file.name} 삭제`); remove.title = '삭제'; remove.append(svgIcon('trash'));
+  remove.addEventListener('click', () => openFileDeleteDialog(file));
+  actions.append(download, remove);
+  row.append(checkbox, name, metadata, size, actions); return row;
 }
 
 function fileTableHeader() {
   const row = document.createElement('article'); row.className = 'file-row file-header'; row.setAttribute('role', 'row');
-  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.disabled = true; checkbox.setAttribute('aria-label', '전체 파일 선택');
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.disabled = true; checkbox.setAttribute('aria-label', '전체 파일 선택');
   const name = document.createElement('span'); name.textContent = '이름';
   const modified = document.createElement('span'); modified.textContent = '수정한 날짜';
   const size = document.createElement('span'); size.textContent = '크기';
@@ -196,12 +201,22 @@ function renderFolderTree() {
   $('#collapse-folders-button').disabled = folderCount === 0;
 }
 
-function renderFileList() {
+async function renderFileList({ animate = false } = {}) {
   const files = state.directory.files.filter((file) => nameMatches(file.name));
   const fileList = $('#file-list');
+  const transitionId = ++state.fileListTransitionId;
+  if (animate && fileList.childElementCount) {
+    fileList.classList.add('is-changing');
+    await new Promise((resolve) => window.setTimeout(resolve, 115));
+    if (transitionId !== state.fileListTransitionId) return;
+  }
   fileList.replaceChildren(...(files.length ? [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
   $('#file-count').textContent = `${files.length}개`;
   $('#files-title').textContent = `${pathParts(state.currentPath).at(-1) ?? '내 파일'}의 파일`;
+  if (animate) window.requestAnimationFrame(() => {
+    if (transitionId === state.fileListTransitionId) fileList.classList.remove('is-changing');
+  });
+  else fileList.classList.remove('is-changing');
 }
 
 function folderTreeNode(path) {
@@ -254,13 +269,13 @@ async function loadFolderTree() {
   renderFolderTree();
 }
 
-async function loadFolder(path = state.currentPath) {
+async function loadFolder(path = state.currentPath, { animate = true } = {}) {
   try {
     const data = await request(`/api/folders?${new URLSearchParams({ path })}`, { headers: {} });
     state.currentPath = data.path;
     expandFolderAncestors(data.path);
     state.directory = { files: data.files };
-    renderBreadcrumbs(); renderFileList();
+    renderBreadcrumbs(); await renderFileList({ animate });
     syncFolderTreeState();
     setStatus('');
   } catch (error) { setStatus(error.message, true); }
@@ -276,8 +291,9 @@ function setView(view) {
 
 function renderStorage(storage) {
   const total = storage.totalBytes; const free = storage.freeBytes; const used = storage.usedBytes;
-  const freePercent = total ? Math.min(100, Math.max(0, Math.round((free / total) * 100))) : 0;
-  const usedPercent = 100 - freePercent;
+  const hasCapacity = Number.isFinite(total) && total > 0;
+  const freePercent = hasCapacity ? Math.min(100, Math.max(0, Math.round((free / total) * 100))) : 0;
+  const usedPercent = hasCapacity ? 100 - freePercent : 0;
   $('#storage-ring').style.setProperty('--storage-progress', usedPercent);
   $('#storage-percent').textContent = `${usedPercent}%`;
   $('#storage-free').textContent = formatStorageSize(free);
@@ -290,16 +306,26 @@ function renderStorage(storage) {
 }
 
 async function loadStorage() {
-  try { renderStorage(await request('/api/storage', { headers: {} })); } catch { $('#mini-storage-value').textContent = '정보를 불러오지 못했습니다.'; }
+  try { renderStorage(await request('/api/storage', { headers: {} })); }
+  catch { renderStorage({ totalBytes: 0, freeBytes: 0, usedBytes: 0 }); }
 }
 
 function openFolderDialog() {
   $('#folder-form').reset(); $('#folder-error').textContent = ''; $('#folder-dialog').showModal();
 }
 
-function openDeleteDialog(folder) {
-  state.pendingDeletePath = folder.path;
+function openFolderDeleteDialog(folder) {
+  state.pendingDelete = { type: 'folder', path: folder.path, name: folder.name };
   $('#delete-title').textContent = `“${folder.name}” 폴더를 삭제할까요?`;
+  $('#delete-description').textContent = '하위 폴더와 파일도 함께 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.';
+  $('#delete-password').value = ''; $('#delete-error').textContent = '';
+  $('#delete-dialog').showModal();
+}
+
+function openFileDeleteDialog(file) {
+  state.pendingDelete = { type: 'file', id: file.id, name: file.name };
+  $('#delete-title').textContent = `“${file.name}” 파일을 삭제할까요?`;
+  $('#delete-description').textContent = '암호화되어 저장된 파일이 영구 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.';
   $('#delete-password').value = ''; $('#delete-error').textContent = '';
   $('#delete-dialog').showModal();
 }
@@ -365,10 +391,18 @@ $('#delete-form').addEventListener('submit', async (event) => {
   event.preventDefault(); $('#delete-error').textContent = '';
   const button = $('#delete-submit'); button.disabled = true;
   try {
+    const pending = state.pendingDelete;
+    if (!pending) throw new Error('삭제할 항목을 찾지 못했습니다.');
     const confirmation = await request('/api/auth/reauthenticate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#delete-password').value }) });
-    await request('/api/folders', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: state.pendingDeletePath, reauthenticationToken: confirmation.token }) });
-    const currentWasDeleted = state.currentPath === state.pendingDeletePath || state.currentPath.startsWith(`${state.pendingDeletePath}/`);
-    $('#delete-dialog').close(); await loadFolder(currentWasDeleted ? parentPath(state.pendingDeletePath) : state.currentPath); await loadFolderTree(); await refreshStorageAfterMutation(); setStatus('폴더와 그 안의 파일을 삭제했습니다.');
+    if (pending.type === 'folder') {
+      await request('/api/folders', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: pending.path, reauthenticationToken: confirmation.token }) });
+      const currentWasDeleted = state.currentPath === pending.path || state.currentPath.startsWith(`${pending.path}/`);
+      $('#delete-dialog').close(); await loadFolder(currentWasDeleted ? parentPath(pending.path) : state.currentPath); await loadFolderTree(); await refreshStorageAfterMutation(); setStatus('폴더와 그 안의 파일을 삭제했습니다.');
+    } else {
+      await request(`/api/files/${encodeURIComponent(pending.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reauthenticationToken: confirmation.token }) });
+      $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus('파일을 삭제했습니다.');
+    }
+    state.pendingDelete = null;
   } catch (error) { $('#delete-error').textContent = error.message; } finally { button.disabled = false; }
 });
 

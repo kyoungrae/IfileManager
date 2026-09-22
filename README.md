@@ -80,7 +80,7 @@ git pull --ff-only
 sh scripts/install-storage-stats-agent.sh
 ```
 
-설치 스크립트는 `.env`에서 `REMOVABLE_DISK_PATH`만 읽으며 다른 비밀값은 읽거나 출력하지 않습니다. 갱신 파일은 호스트의 `/tmp/ifile-manager/storage-stats.json`에 저장되고 읽기 전용으로 컨테이너에 마운트됩니다. 앱은 5분 이내 값만 사용합니다.
+설치 스크립트는 `.env`에서 `REMOVABLE_DISK_PATH`만 읽으며 다른 비밀값은 읽거나 출력하지 않습니다. 갱신 파일은 호스트의 `/tmp/ifile-manager/storage-stats.json`에 저장되고 읽기 전용으로 컨테이너에 마운트됩니다. 호스트 통계가 없거나 유효하지 않으면 앱은 Docker 가상 디스크 용량을 대신 표시하지 않고 `0 B`로 표시합니다.
 
 ## Jenkins + GitHub 수동 배포
 

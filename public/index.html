@@ -31,8 +31,8 @@
             <button class="side-nav-item" type="button" aria-label="즐겨찾기" data-tooltip="즐겨찾기" data-nav="favorites"><span class="nav-icon" data-icon="star"></span></button>
           </nav>
           <section class="storage-mini" aria-label="저장소 요약">
-            <div class="mini-storage-ring" id="mini-storage-ring"><strong id="mini-storage-percent">–</strong></div>
-            <strong class="visually-hidden" id="mini-storage-value">확인 중…</strong>
+            <div class="mini-storage-ring" id="mini-storage-ring"><strong id="mini-storage-percent">0%</strong></div>
+            <strong class="visually-hidden" id="mini-storage-value">사용 0 B / 0 B 0%</strong>
           </section>
         </aside>
 
@@ -60,9 +60,9 @@
               <section class="content-section folder-section"><div class="section-heading"><h2>폴더</h2><span id="folder-count">0개</span><button class="collapse-button" id="collapse-folders-button" type="button">모두 접기</button></div><div id="folder-list" class="folder-tree" role="tree"></div></section>
               <aside class="storage-card" aria-label="저장소 상세">
                 <h2>저장소</h2>
-                <div class="storage-overview"><div class="storage-ring" id="storage-ring"><strong id="storage-percent">–</strong></div><div><p>남은 저장 공간</p><strong id="storage-free">확인 중…</strong><small id="storage-total">/ –</small></div></div>
+                <div class="storage-overview"><div class="storage-ring" id="storage-ring"><strong id="storage-percent">0%</strong></div><div><p>남은 저장 공간</p><strong id="storage-free">0 B</strong><small id="storage-total">/ 0 B</small></div></div>
                 <div class="storage-divider"></div>
-                <dl class="storage-legend"><div><dt><span class="legend-dot used"></span>사용된 공간</dt><dd id="storage-used">–</dd></div><div><dt><span class="legend-dot free"></span>남은 저장 공간</dt><dd id="storage-free-detail">–</dd></div></dl>
+                <dl class="storage-legend"><div><dt><span class="legend-dot used"></span>사용된 공간</dt><dd id="storage-used">0 B</dd></div><div><dt><span class="legend-dot free"></span>남은 저장 공간</dt><dd id="storage-free-detail">0 B</dd></div></dl>
               </aside>
             </div>
             <section class="content-section files-section" aria-live="polite"><div class="section-heading"><h2 id="files-title">내 파일의 파일</h2><span id="file-count">0개</span></div><div id="file-list" class="file-list" role="table"></div></section>
@@ -73,7 +73,7 @@
     </main>
 
     <dialog id="folder-dialog"><form method="dialog" id="folder-form"><p class="dialog-eyebrow">새 폴더</p><h2>폴더를 만들까요?</h2><label>폴더 이름<input id="folder-name" maxlength="120" required autofocus></label><p class="subtle">한글·영문·숫자와 공백, 점, 밑줄, 괄호, 하이픈을 사용할 수 있습니다.</p><p id="folder-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="folder-submit" value="default">만들기</button></div></form></dialog>
-    <dialog id="delete-dialog"><form method="dialog" id="delete-form"><p class="danger-label">삭제 확인</p><h2 id="delete-title">폴더를 삭제할까요?</h2><p class="subtle">하위 폴더와 파일도 함께 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.</p><label>현재 비밀번호<input id="delete-password" type="password" autocomplete="current-password" required></label><p id="delete-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="delete-submit" class="danger" value="default">영구 삭제</button></div></form></dialog>
+    <dialog id="delete-dialog"><form method="dialog" id="delete-form"><p class="danger-label">삭제 확인</p><h2 id="delete-title">삭제할까요?</h2><p id="delete-description" class="subtle"></p><label>현재 비밀번호<input id="delete-password" type="password" autocomplete="current-password" required></label><p id="delete-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="delete-submit" class="danger" value="default">영구 삭제</button></div></form></dialog>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
