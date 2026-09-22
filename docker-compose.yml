@@ -21,6 +21,8 @@ services:
       - "${PUBLIC_BIND_IP:-127.0.0.1}:${APP_PORT:-4300}:3000"
     volumes:
       - "${REMOVABLE_DISK_PATH:?Set REMOVABLE_DISK_PATH in .env}/ifile-manager:/data"
+      # macOS host agent writes real volume capacity here; Docker's statfs is virtualized.
+      - "/tmp/ifile-manager:/run/ifile-manager:ro"
     # Allows host.docker.internal to work on Linux too. On Docker Desktop it is built in.
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -27,7 +27,6 @@
           <div class="brand" aria-label="파일 관리자"><span class="brand-mark" data-icon="folder" aria-hidden="true"></span><span class="visually-hidden">파일 관리자</span></div>
           <nav class="side-nav" aria-label="주요 메뉴">
             <button class="side-nav-item active" type="button" aria-current="page" aria-label="내 파일" data-tooltip="내 파일" data-nav="files"><span class="nav-icon" data-icon="folder"></span></button>
-            <button class="side-nav-item" type="button" aria-label="공유됨" data-tooltip="공유됨" data-nav="shared"><span class="nav-icon" data-icon="users"></span></button>
             <button class="side-nav-item" type="button" aria-label="최근 항목" data-tooltip="최근 항목" data-nav="recent"><span class="nav-icon" data-icon="clock"></span></button>
             <button class="side-nav-item" type="button" aria-label="즐겨찾기" data-tooltip="즐겨찾기" data-nav="favorites"><span class="nav-icon" data-icon="star"></span></button>
           </nav>
@@ -58,7 +57,7 @@
             <p id="status" class="status" role="status"></p>
             <nav id="breadcrumbs" class="breadcrumbs" aria-label="현재 폴더"></nav>
             <div class="library-layout" aria-live="polite">
-              <section class="content-section folder-section"><div class="section-heading"><h2>폴더</h2><span id="folder-count">0개</span></div><div id="folder-list" class="item-grid"></div></section>
+              <section class="content-section folder-section"><div class="section-heading"><h2>폴더</h2><span id="folder-count">0개</span><button class="collapse-button" id="collapse-folders-button" type="button">모두 접기</button></div><div id="folder-list" class="folder-tree" role="tree"></div></section>
               <aside class="storage-card" aria-label="저장소 상세">
                 <h2>저장소</h2>
                 <div class="storage-overview"><div class="storage-ring" id="storage-ring"><strong id="storage-percent">–</strong></div><div><p>남은 저장 공간</p><strong id="storage-free">확인 중…</strong><small id="storage-total">/ –</small></div></div>
@@ -66,7 +65,8 @@
                 <dl class="storage-legend"><div><dt><span class="legend-dot used"></span>사용된 공간</dt><dd id="storage-used">–</dd></div><div><dt><span class="legend-dot free"></span>남은 저장 공간</dt><dd id="storage-free-detail">–</dd></div></dl>
               </aside>
             </div>
-            <section class="content-section files-section" aria-live="polite"><div class="section-heading"><h2>파일</h2><span id="file-count">0개</span></div><div id="file-list" class="file-list"></div></section>
+            <section class="content-section files-section" aria-live="polite"><div class="section-heading"><h2 id="files-title">내 파일의 파일</h2><span id="file-count">0개</span></div><div id="file-list" class="file-list" role="table"></div></section>
+            <section id="upload-drop-zone" class="upload-dropbar" tabindex="0" aria-label="파일 업로드 영역"><span class="dropbar-icon" data-icon="upload" aria-hidden="true"></span><strong>파일 끌어놓기 또는 업로드</strong><span>업로드한 파일은 암호화되어 저장됩니다.</span><span class="dropbar-chevron" aria-hidden="true">⌄</span></section>
           </div>
         </section>
       </section>

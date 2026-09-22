@@ -4,7 +4,8 @@ const state = {
   pendingDeletePath: '',
   directory: { folders: [], files: [] },
   query: '',
-  view: 'grid'
+  view: 'grid',
+  foldersCollapsed: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -20,7 +21,8 @@ const iconPaths = {
   upload: '<path d="M12 15V3M7.5 7.5 12 3l4.5 4.5"/><path d="M5 13.5v4A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-4"/>',
   grid: '<rect x="4" y="4" width="6" height="6" rx=".5"/><rect x="14" y="4" width="6" height="6" rx=".5"/><rect x="4" y="14" width="6" height="6" rx=".5"/><rect x="14" y="14" width="6" height="6" rx=".5"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
-  'file-up': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9.5 14.5 12 12l2.5 2.5"/>'
+  'file-up': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9.5 14.5 12 12l2.5 2.5"/>',
+  'chevron-right': '<path d="m9 18 6-6-6-6"/>'
 };
 
 function applyIcons(root = document) {
@@ -94,22 +96,39 @@ function renderBreadcrumbs() {
   $('#up-button').disabled = !state.currentPath;
 }
 
-function folderCard(folder) {
-  const card = document.createElement('article'); card.className = 'folder-card';
+function folderRow(folder, { root = false } = {}) {
+  const card = document.createElement('article'); card.className = `folder-tree-row${root ? ' root-folder' : ''}`; card.setAttribute('role', 'treeitem');
   const open = document.createElement('button'); open.className = 'folder-open'; open.type = 'button'; open.title = folder.name;
+  const chevron = document.createElement('span'); chevron.className = 'folder-chevron'; chevron.append(svgIcon('chevron-right'));
   const icon = svgIcon('folder', 'folder-icon');
   const name = document.createElement('span'); name.className = 'item-name'; name.textContent = folder.name;
-  open.append(icon, name); open.addEventListener('click', () => loadFolder(folder.path));
-  const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.textContent = '삭제'; remove.addEventListener('click', () => openDeleteDialog(folder));
-  card.append(open, remove); return card;
+  open.append(chevron, icon, name); open.addEventListener('click', () => loadFolder(folder.path));
+  card.append(open);
+  if (!root) {
+    const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.textContent = '삭제'; remove.addEventListener('click', () => openDeleteDialog(folder));
+    card.append(remove);
+  }
+  return card;
 }
 
 function fileRow(file) {
-  const row = document.createElement('article'); row.className = 'file-row';
-  const name = document.createElement('span'); name.className = 'file-name'; name.textContent = file.name; name.title = file.name;
-  const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = `${formatSize(file.size)} · ${new Date(file.createdAt).toLocaleDateString('ko-KR')}`;
+  const row = document.createElement('article'); row.className = 'file-row'; row.setAttribute('role', 'row');
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.setAttribute('aria-label', `${file.name} 선택`);
+  const name = document.createElement('span'); name.className = 'file-name'; name.title = file.name; name.append(svgIcon('file-up', 'file-icon'), document.createTextNode(file.name));
+  const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.createdAt));
+  const size = document.createElement('span'); size.className = 'file-size'; size.textContent = formatSize(file.size);
   const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.textContent = '다운로드';
-  row.append(name, metadata, download); return row;
+  row.append(checkbox, name, metadata, size, download); return row;
+}
+
+function fileTableHeader() {
+  const row = document.createElement('article'); row.className = 'file-row file-header'; row.setAttribute('role', 'row');
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.disabled = true; checkbox.setAttribute('aria-label', '전체 파일 선택');
+  const name = document.createElement('span'); name.textContent = '이름';
+  const modified = document.createElement('span'); modified.textContent = '수정한 날짜';
+  const size = document.createElement('span'); size.textContent = '크기';
+  const actions = document.createElement('span'); actions.textContent = '작업';
+  row.append(checkbox, name, modified, size, actions); return row;
 }
 
 function emptyFolder() {
@@ -124,18 +143,12 @@ function emptyFolder() {
 }
 
 function emptyFiles() {
-  const panel = document.createElement('section'); panel.className = 'empty-panel upload-zone'; panel.tabIndex = 0;
-  const illustration = document.createElement('div'); illustration.className = 'upload-illustration'; illustration.innerHTML = '<svg viewBox="0 0 64 54" aria-hidden="true"><path d="M18 43H12a10 10 0 0 1-.7-20 15 15 0 0 1 29.2-3.5A12 12 0 1 1 46 43h-5"/><path d="M32 43V22m0 0-8 8m8-8 8 8"/></svg>';
-  const title = document.createElement('h3'); title.textContent = '파일을 이곳에 끌어다 놓으세요';
-  const description = document.createElement('p'); description.textContent = '또는 컴퓨터에서 선택하세요';
-  const button = document.createElement('button'); button.className = 'upload-button'; button.type = 'button'; button.append(svgIcon('upload'), document.createTextNode('파일 업로드'));
+  const panel = document.createElement('section'); panel.className = 'empty-panel file-empty';
+  const title = document.createElement('h3'); title.textContent = '아직 파일이 없습니다.';
+  const description = document.createElement('p'); description.textContent = '아래 업로드 영역에서 파일을 추가해 보세요.';
+  const button = document.createElement('button'); button.className = 'outline-button'; button.type = 'button'; button.append(svgIcon('upload'), document.createTextNode('파일 업로드'));
   button.addEventListener('click', () => $('#file-input').click());
-  const note = document.createElement('p'); note.className = 'upload-note'; note.textContent = '업로드한 파일은 암호화되어 저장됩니다.';
-  panel.append(illustration, title, description, button, note);
-  ['dragenter', 'dragover'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.add('dragover'); }));
-  ['dragleave', 'drop'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.remove('dragover'); }));
-  panel.addEventListener('drop', (event) => uploadSelectedFile(event.dataTransfer?.files?.[0]));
-  panel.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#file-input').click(); } });
+  panel.append(title, description, button);
   return panel;
 }
 
@@ -150,11 +163,14 @@ function renderDirectory() {
   const folders = state.directory.folders.filter((folder) => nameMatches(folder.name));
   const files = state.directory.files.filter((file) => nameMatches(file.name));
   const folderList = $('#folder-list'); const fileList = $('#file-list');
-  folderList.classList.toggle('list-view', state.view === 'list');
-  folderList.replaceChildren(...(folders.length ? folders.map(folderCard) : [state.query ? emptySearch('폴더') : emptyFolder()]));
-  fileList.replaceChildren(...(files.length ? files.map(fileRow) : [state.query ? emptySearch('파일') : emptyFiles()]));
+  const root = { name: pathParts(state.currentPath).at(-1) ?? '내 파일', path: parentPath() };
+  const folderRows = state.foldersCollapsed ? [folderRow(root, { root: true })] : [folderRow(root, { root: true }), ...folders.map((folder) => folderRow(folder))];
+  folderList.replaceChildren(...(folders.length || !state.query ? folderRows : [emptySearch('폴더')]));
+  fileList.replaceChildren(...(files.length ? [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
   $('#folder-count').textContent = `${folders.length}개`;
   $('#file-count').textContent = `${files.length}개`;
+  $('#files-title').textContent = `${root.name}의 파일`;
+  $('#collapse-folders-button').textContent = state.foldersCollapsed ? '모두 펼치기' : '모두 접기';
 }
 
 async function loadFolder(path = state.currentPath) {
@@ -212,7 +228,16 @@ async function uploadSelectedFile(file) {
   catch (error) { setStatus(error.message, true); }
 }
 
+function attachUploadDropzone(panel) {
+  ['dragenter', 'dragover'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.add('dragover'); }));
+  ['dragleave', 'drop'].forEach((eventName) => panel.addEventListener(eventName, (event) => { event.preventDefault(); panel.classList.remove('dragover'); }));
+  panel.addEventListener('drop', (event) => uploadSelectedFile(event.dataTransfer?.files?.[0]));
+  panel.addEventListener('click', () => $('#file-input').click());
+  panel.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#file-input').click(); } });
+}
+
 applyIcons();
+attachUploadDropzone($('#upload-drop-zone'));
 
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault(); $('#login-error').textContent = '';
@@ -228,6 +253,7 @@ $('#logout-button').addEventListener('click', async () => {
 });
 $('#up-button').addEventListener('click', () => loadFolder(parentPath()));
 $('#new-folder-button').addEventListener('click', openFolderDialog);
+$('#collapse-folders-button').addEventListener('click', () => { state.foldersCollapsed = !state.foldersCollapsed; renderDirectory(); });
 $('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); renderDirectory(); });
 $('#grid-view-button').addEventListener('click', () => setView('grid'));
 $('#list-view-button').addEventListener('click', () => setView('list'));

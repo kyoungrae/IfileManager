@@ -7,7 +7,7 @@ export const storageRoot = path.join(config.dataRoot, 'storage');
 export const fileRoot = path.join(config.dataRoot, 'files');
 export const tempRoot = path.join(config.dataRoot, '.ifile-manager-tmp');
 export const trashRoot = path.join(config.dataRoot, '.ifile-manager-trash');
-export const hostStorageStatsPath = path.join(config.dataRoot, '.storage-stats.json');
+export const hostStorageStatsPath = config.hostStorageStatsPath;
 
 const storageStatsMaxAgeMs = 5 * 60 * 1000;
 

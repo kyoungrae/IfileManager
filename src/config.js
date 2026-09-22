@@ -25,6 +25,7 @@ export const config = Object.freeze({
   jwtSecret: required('JWT_SECRET'),
   cookieSecure: process.env.COOKIE_SECURE !== 'false',
   dataRoot: path.resolve(process.env.DATA_ROOT ?? './data'),
+  hostStorageStatsPath: process.env.HOST_STORAGE_STATS_PATH ?? '/run/ifile-manager/storage-stats.json',
   maxUploadBytes: maxUploadMb * 1024 * 1024,
   bootstrapUsername: process.env.BOOTSTRAP_ADMIN_USERNAME,
   bootstrapPassword: process.env.BOOTSTRAP_ADMIN_PASSWORD

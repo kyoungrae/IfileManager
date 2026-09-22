@@ -23,11 +23,13 @@ for value in "$total_blocks" "$used_blocks" "$free_blocks"; do
   case "$value" in ''|*[!0-9]*) echo 'Could not parse df output.' >&2; exit 1 ;; esac
 done
 
-target="$storage_path/ifile-manager/.storage-stats.json"
-temporary="$storage_path/ifile-manager/.storage-stats.$$.tmp"
+target_directory=/tmp/ifile-manager
+target="$target_directory/storage-stats.json"
+temporary="$target_directory/storage-stats.$$.tmp"
 updated_at=$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 umask 022
+/bin/mkdir -p "$target_directory"
 printf '{"totalBytes":%s,"usedBytes":%s,"freeBytes":%s,"updatedAt":"%s"}\n' \
   "$((total_blocks * 1024))" "$((used_blocks * 1024))" "$((free_blocks * 1024))" "$updated_at" > "$temporary"
 /bin/chmod 644 "$temporary"
