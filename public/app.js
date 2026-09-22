@@ -12,7 +12,9 @@ const state = {
   v4Logs: { path: '', entries: [] },
   query: '',
   draggedFolderPath: null,
-  folderMoveInProgress: false
+  folderMoveInProgress: false,
+  trash: { files: [] },
+  selectedTrashIds: new Set()
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -252,6 +254,77 @@ function syncFileSelectionControls() {
   button.disabled = count === 0;
   button.setAttribute('aria-hidden', String(count === 0));
   $('#bulk-download-label').textContent = `선택 파일 ${count}개 ZIP 다운로드`;
+}
+
+function trashFileRow(file) {
+  const row = document.createElement('article'); row.className = 'file-row'; row.setAttribute('role', 'row');
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.dataset.trashId = file.id; checkbox.checked = state.selectedTrashIds.has(file.id); checkbox.setAttribute('aria-label', `${file.name} 선택`);
+  row.classList.toggle('is-selected', checkbox.checked);
+  checkbox.addEventListener('change', () => {
+    state.selectedTrashIds[checkbox.checked ? 'add' : 'delete'](file.id);
+    row.classList.toggle('is-selected', checkbox.checked);
+    syncTrashSelectionControls();
+  });
+  const icon = fileIconFor(file.name);
+  const name = document.createElement('span'); name.className = 'file-name'; name.title = file.originalPath ? `원래 위치: /${file.originalPath}` : '원래 위치: 내 파일'; name.append(svgIcon(icon.icon, `file-icon file-icon-${icon.kind}`), document.createTextNode(file.name));
+  const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.title = file.originalPath ? `원래 위치: /${file.originalPath}` : '원래 위치: 내 파일'; metadata.textContent = `삭제 ${new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.trashedAt))}`;
+  const size = document.createElement('span'); size.className = 'file-size'; size.textContent = formatSize(file.size);
+  const actions = document.createElement('div'); actions.className = 'file-actions';
+  const restore = document.createElement('button'); restore.className = 'restore-file'; restore.type = 'button'; restore.textContent = '복원'; restore.addEventListener('click', () => { void restoreTrashFile(file); });
+  const remove = document.createElement('button'); remove.className = 'delete-file'; remove.type = 'button'; remove.setAttribute('aria-label', `${file.name} 영구 삭제`); remove.title = '영구 삭제'; remove.append(svgIcon('trash')); remove.addEventListener('click', () => openTrashDeleteDialog([file]));
+  actions.append(restore, remove);
+  row.append(checkbox, name, metadata, size, actions); return row;
+}
+
+function trashTableHeader() {
+  const row = document.createElement('article'); row.className = 'file-row file-header'; row.setAttribute('role', 'row');
+  const checkbox = document.createElement('input'); checkbox.id = 'select-all-trash'; checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.setAttribute('aria-label', '표시된 휴지통 파일 전체 선택');
+  checkbox.addEventListener('change', () => {
+    const visibleFiles = state.trash.files.filter((file) => nameMatches(file.name));
+    visibleFiles.forEach((file) => state.selectedTrashIds[checkbox.checked ? 'add' : 'delete'](file.id));
+    document.querySelectorAll('#trash-list .file-checkbox[data-trash-id]').forEach((item) => {
+      item.checked = checkbox.checked;
+      item.closest('.file-row')?.classList.toggle('is-selected', checkbox.checked);
+    });
+    syncTrashSelectionControls();
+  });
+  const name = document.createElement('span'); name.textContent = '이름';
+  const modified = document.createElement('span'); modified.textContent = '삭제한 날짜';
+  const size = document.createElement('span'); size.textContent = '크기';
+  const actions = document.createElement('span'); actions.textContent = '작업';
+  row.append(checkbox, name, modified, size, actions); return row;
+}
+
+function syncTrashSelectionControls() {
+  const visibleFiles = state.trash.files.filter((file) => nameMatches(file.name));
+  const selectedVisibleCount = visibleFiles.filter((file) => state.selectedTrashIds.has(file.id)).length;
+  const selectAll = $('#select-all-trash');
+  if (selectAll) {
+    selectAll.disabled = !visibleFiles.length;
+    selectAll.checked = visibleFiles.length > 0 && selectedVisibleCount === visibleFiles.length;
+    selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleFiles.length;
+  }
+  const button = $('#bulk-trash-delete-button');
+  const count = state.selectedTrashIds.size;
+  button.classList.toggle('is-hidden', count === 0);
+  button.disabled = count === 0;
+  button.setAttribute('aria-hidden', String(count === 0));
+  $('#bulk-trash-delete-label').textContent = `선택 파일 ${count}개 영구 삭제`;
+}
+
+function emptyTrash() {
+  const panel = document.createElement('section'); panel.className = 'empty-panel file-empty';
+  const title = document.createElement('h3'); title.textContent = '휴지통이 비어 있습니다.';
+  const description = document.createElement('p'); description.textContent = '삭제한 파일은 이곳에서 복원하거나 영구 삭제할 수 있습니다.';
+  panel.append(title, description); return panel;
+}
+
+function renderTrashList() {
+  const files = state.trash.files.filter((file) => nameMatches(file.name));
+  const list = $('#trash-list');
+  list.replaceChildren(...(files.length ? [trashTableHeader(), ...files.map(trashFileRow)] : [state.query ? emptySearch('휴지통') : emptyTrash()]));
+  $('#trash-count').textContent = `${files.length}개`;
+  syncTrashSelectionControls();
 }
 
 function emptyFolder() {
@@ -500,14 +573,16 @@ async function loadFolder(path = state.currentPath, { animate = true } = {}) {
 function setWorkspaceSection(section) {
   state.section = section;
   const isV4Log = section === 'v4log';
-  $('#library-layout').hidden = isV4Log;
-  $('#files-section').hidden = isV4Log;
-  $('#upload-drop-zone').hidden = isV4Log;
+  const isTrash = section === 'trash';
+  $('#library-layout').hidden = isV4Log || isTrash;
+  $('#files-section').hidden = isV4Log || isTrash;
+  $('#upload-drop-zone').hidden = isV4Log || isTrash;
   $('#v4-log-section').hidden = !isV4Log;
-  $('#new-folder-button').hidden = isV4Log;
-  $('#toolbar-upload').hidden = isV4Log;
-  $('#up-button').hidden = isV4Log;
-  $('#file-search').placeholder = isV4Log ? 'V4 로그 파일명으로 검색하세요.' : '파일명으로 검색하세요.';
+  $('#trash-section').hidden = !isTrash;
+  $('#new-folder-button').hidden = isV4Log || isTrash;
+  $('#toolbar-upload').hidden = isV4Log || isTrash;
+  $('#up-button').hidden = isV4Log || isTrash;
+  $('#file-search').placeholder = isV4Log ? 'V4 로그 파일명으로 검색하세요.' : isTrash ? '휴지통 파일명으로 검색하세요.' : '파일명으로 검색하세요.';
   document.querySelectorAll('.side-nav-item').forEach((button) => {
     const active = button.dataset.nav === section;
     button.classList.toggle('active', active);
@@ -534,6 +609,25 @@ async function showV4Logs() {
   state.query = ''; $('#file-search').value = '';
   setWorkspaceSection('v4log');
   await loadV4Logs(state.v4Logs.path);
+}
+
+async function loadTrash() {
+  try {
+    const data = await request('/api/trash', { headers: {} });
+    state.trash = { files: data.files };
+    state.selectedTrashIds = new Set([...state.selectedTrashIds].filter((id) => data.files.some((file) => file.id === id)));
+    const breadcrumbs = $('#breadcrumbs'); breadcrumbs.replaceChildren();
+    const label = document.createElement('span'); label.className = 'crumb'; label.textContent = '휴지통'; breadcrumbs.append(label);
+    $('#page-location').textContent = '휴지통';
+    $('#up-button').disabled = true;
+    renderTrashList(); setStatus('');
+  } catch (error) { setStatus(error.message, true); }
+}
+
+async function showTrash() {
+  state.query = ''; $('#file-search').value = '';
+  setWorkspaceSection('trash');
+  await loadTrash();
 }
 
 function renderStorage(storage) {
@@ -574,6 +668,7 @@ function openFolderDeleteDialog(folder) {
   state.pendingDelete = { type: 'folder', path: folder.path, name: folder.name };
   $('#delete-title').textContent = `“${folder.name}” 폴더를 삭제할까요?`;
   $('#delete-description').textContent = '하위 폴더와 파일도 함께 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.';
+  $('#delete-submit').textContent = '영구 삭제';
   $('#delete-password').value = ''; $('#delete-error').textContent = '';
   $('#delete-dialog').showModal();
 }
@@ -581,9 +676,29 @@ function openFolderDeleteDialog(folder) {
 function openFileDeleteDialog(file) {
   state.pendingDelete = { type: 'file', id: file.id, name: file.name };
   $('#delete-title').textContent = `“${file.name}” 파일을 삭제할까요?`;
-  $('#delete-description').textContent = '암호화되어 저장된 파일이 영구 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.';
+  $('#delete-description').textContent = '웹 목록에서는 제거되지만 암호화 파일과 원본 파일은 이동식 디스크의 .ifile-manager-trash에 보관됩니다. 계속하려면 현재 비밀번호를 입력하세요.';
+  $('#delete-submit').textContent = '휴지통으로 이동';
   $('#delete-password').value = ''; $('#delete-error').textContent = '';
   $('#delete-dialog').showModal();
+}
+
+function openTrashDeleteDialog(files) {
+  const selected = [...files];
+  if (!selected.length) return;
+  state.pendingDelete = { type: 'trash', ids: selected.map((file) => file.id), count: selected.length };
+  $('#delete-title').textContent = selected.length === 1 ? `“${selected[0].name}” 파일을 영구 삭제할까요?` : `${selected.length}개 파일을 영구 삭제할까요?`;
+  $('#delete-description').textContent = '휴지통의 암호화 파일과 원본 파일이 이동식 디스크에서 영구 삭제되며 복구할 수 없습니다. 계속하려면 현재 비밀번호를 입력하세요.';
+  $('#delete-submit').textContent = '영구 삭제';
+  $('#delete-password').value = ''; $('#delete-error').textContent = '';
+  $('#delete-dialog').showModal();
+}
+
+async function restoreTrashFile(file) {
+  try {
+    const result = await request(`/api/trash/${encodeURIComponent(file.id)}/restore`, { method: 'POST' });
+    await loadTrash(); await loadFolderTree();
+    setStatus(result.path ? `“${result.name}” 파일을 /${result.path}에 복원했습니다.` : `“${result.name}” 파일을 내 파일에 복원했습니다.`);
+  } catch (error) { setStatus(error.message, true); }
 }
 
 async function uploadSelectedFiles(files) {
@@ -648,14 +763,16 @@ $('#up-button').addEventListener('click', () => {
 });
 $('#new-folder-button').addEventListener('click', openFolderDialog);
 $('#collapse-folders-button').addEventListener('click', () => setAllFoldersExpanded(!state.expandedFolderPaths.has('')));
-$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); if (state.section === 'v4log') renderV4LogList(); else renderFileList(); });
+$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); if (state.section === 'v4log') renderV4LogList(); else if (state.section === 'trash') renderTrashList(); else renderFileList(); });
 $('#file-input').addEventListener('change', async (event) => { await uploadSelectedFiles(event.target.files); event.target.value = ''; });
 $('#bulk-download-button').addEventListener('click', downloadSelectedFilesAsZip);
+$('#bulk-trash-delete-button').addEventListener('click', () => openTrashDeleteDialog(state.trash.files.filter((file) => state.selectedTrashIds.has(file.id))));
 
 document.querySelectorAll('dialog button[value="cancel"]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 document.querySelectorAll('.side-nav-item').forEach((button) => button.addEventListener('click', () => {
   if (button.dataset.nav === 'files') void showFiles();
   else if (button.dataset.nav === 'v4log') void showV4Logs();
+  else if (button.dataset.nav === 'trash') void showTrash();
   else setStatus('이 메뉴는 다음 업데이트에서 제공됩니다. 현재는 내 파일과 V4Log를 사용할 수 있습니다.');
 }));
 
@@ -690,9 +807,12 @@ $('#delete-form').addEventListener('submit', async (event) => {
       await request('/api/folders', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: pending.path, reauthenticationToken: confirmation.token }) });
       const currentWasDeleted = state.currentPath === pending.path || state.currentPath.startsWith(`${pending.path}/`);
       $('#delete-dialog').close(); await loadFolder(currentWasDeleted ? parentPath(pending.path) : state.currentPath); await loadFolderTree(); await refreshStorageAfterMutation(); setStatus('폴더와 그 안의 파일을 삭제했습니다.');
+    } else if (pending.type === 'trash') {
+      await request('/api/trash', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashIds: pending.ids, reauthenticationToken: confirmation.token }) });
+      $('#delete-dialog').close(); await loadTrash(); await refreshStorageAfterMutation(); setStatus(`${pending.count}개 파일을 영구 삭제했습니다.`);
     } else {
       await request(`/api/files/${encodeURIComponent(pending.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reauthenticationToken: confirmation.token }) });
-      $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus('파일을 삭제했습니다.');
+      $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus('파일을 .ifile-manager-trash로 이동했습니다.');
     }
     state.pendingDelete = null;
   } catch (error) { $('#delete-error').textContent = error.message; } finally { button.disabled = false; }
