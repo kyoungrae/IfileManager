@@ -16,7 +16,7 @@ import {
 } from './auth.js';
 import {
   ROOT_PATH_KEY, collectDirectoryPaths, existingDirectory, fileRoot, initializeStorage,
-  normalizeRelativePath, relativeChild, storageUsage, tempRoot, trashRoot, validateFolderName
+  normalizeRelativePath, relativeChild, storageRoot, storageUsage, tempRoot, trashRoot, validateFolderName
 } from './storage.js';
 
 const app = express();
@@ -57,6 +57,31 @@ function clientFilename(name) {
   return result;
 }
 
+async function readFolderTree() {
+  const folders = await ManagedFolder.find({}).lean();
+  const namesByPath = new Map();
+  for (const folder of folders) {
+    try { namesByPath.set(open(folder.pathEncrypted), open(folder.nameEncrypted)); } catch { /* Tampered metadata is omitted. */ }
+  }
+
+  async function readChildren(relativePath, absolutePath) {
+    const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+    const children = await Promise.all(entries
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+      .map(async (entry) => {
+        const folderPath = relativeChild(relativePath, entry.name);
+        return {
+          name: namesByPath.get(folderPath) ?? entry.name,
+          path: folderPath,
+          children: await readChildren(folderPath, path.join(absolutePath, entry.name))
+        };
+      }));
+    return children.sort((left, right) => left.name.localeCompare(right.name, 'ko'));
+  }
+
+  return readChildren('', storageRoot);
+}
+
 async function audit(actor, action, target, details) {
   await AuditLog.create({ actor, action, targetEncrypted: seal(target), detailsEncrypted: details ? seal(JSON.stringify(details)) : undefined });
 }
@@ -88,6 +113,10 @@ app.get('/api/auth/me', requireAuth, (request, response) => response.json({ user
 
 app.get('/api/storage', requireAuth, asyncRoute(async (_request, response) => {
   response.json(await storageUsage());
+}));
+
+app.get('/api/folders/tree', requireAuth, asyncRoute(async (_request, response) => {
+  response.json({ folders: await readFolderTree() });
 }));
 
 app.post('/api/users', requireAppRequest, requireAuth, requireAdmin, asyncRoute(async (request, response) => {

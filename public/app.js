@@ -2,10 +2,11 @@ const state = {
   user: null,
   currentPath: '',
   pendingDeletePath: '',
-  directory: { folders: [], files: [] },
+  directory: { files: [] },
+  folderTree: [],
+  expandedFolderPaths: new Set(['']),
   query: '',
-  view: 'grid',
-  foldersCollapsed: false
+  view: 'grid'
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -77,7 +78,7 @@ function formatStorageSize(bytes) {
 }
 
 function pathParts(path) { return path ? path.split('/') : []; }
-function parentPath() { const parts = pathParts(state.currentPath); parts.pop(); return parts.join('/'); }
+function parentPath(path = state.currentPath) { const parts = pathParts(path); parts.pop(); return parts.join('/'); }
 function nameMatches(name) { return name.toLocaleLowerCase('ko-KR').includes(state.query.toLocaleLowerCase('ko-KR')); }
 
 function renderBreadcrumbs() {
@@ -96,19 +97,41 @@ function renderBreadcrumbs() {
   $('#up-button').disabled = !state.currentPath;
 }
 
-function folderRow(folder, { root = false } = {}) {
-  const card = document.createElement('article'); card.className = `folder-tree-row${root ? ' root-folder' : ''}`; card.setAttribute('role', 'treeitem');
-  const open = document.createElement('button'); open.className = 'folder-open'; open.type = 'button'; open.title = folder.name;
+function folderNode(folder, depth = 0, { root = false } = {}) {
+  const node = document.createElement('div');
+  node.className = `folder-tree-node${root ? ' root-node' : ''}`;
+  node.dataset.folderPath = folder.path;
+  const hasChildren = folder.children.length > 0;
+  const expanded = state.expandedFolderPaths.has(folder.path);
+  node.classList.toggle('is-expanded', expanded);
+  node.classList.toggle('is-active', folder.path === state.currentPath);
+
+  const row = document.createElement('article'); row.className = `folder-tree-row${root ? ' root-folder' : ''}`; row.setAttribute('role', 'treeitem');
+  row.style.setProperty('--folder-depth', depth);
+  const toggle = document.createElement('button'); toggle.className = 'folder-toggle'; toggle.type = 'button';
+  toggle.setAttribute('aria-label', `${folder.name} ${expanded ? '접기' : '펼치기'}`);
+  toggle.setAttribute('aria-expanded', String(expanded));
+  toggle.disabled = !hasChildren;
   const chevron = document.createElement('span'); chevron.className = 'folder-chevron'; chevron.append(svgIcon('chevron-right'));
+  toggle.append(chevron);
+  toggle.addEventListener('click', () => setFolderExpanded(folder.path, !state.expandedFolderPaths.has(folder.path)));
+
+  const open = document.createElement('button'); open.className = 'folder-open'; open.type = 'button'; open.title = folder.name;
   const icon = svgIcon('folder', 'folder-icon');
   const name = document.createElement('span'); name.className = 'item-name'; name.textContent = folder.name;
-  open.append(chevron, icon, name); open.addEventListener('click', () => loadFolder(folder.path));
-  card.append(open);
+  open.append(icon, name); open.addEventListener('click', () => loadFolder(folder.path));
+  row.append(toggle, open);
   if (!root) {
     const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.textContent = '삭제'; remove.addEventListener('click', () => openDeleteDialog(folder));
-    card.append(remove);
+    row.append(remove);
   }
-  return card;
+
+  const children = document.createElement('div'); children.className = 'folder-tree-children';
+  const content = document.createElement('div'); content.className = 'folder-tree-children-content';
+  content.append(...folder.children.map((child) => folderNode(child, depth + 1)));
+  children.append(content);
+  node.append(row, children);
+  return node;
 }
 
 function fileRow(file) {
@@ -159,48 +182,87 @@ function emptySearch(kind) {
   panel.append(title, description); return panel;
 }
 
-function renderDirectory() {
-  const folders = state.directory.folders.filter((folder) => nameMatches(folder.name));
-  const files = state.directory.files.filter((file) => nameMatches(file.name));
-  const folderList = $('#folder-list'); const fileList = $('#file-list');
-  const root = { name: pathParts(state.currentPath).at(-1) ?? '내 파일', path: parentPath() };
-  const rootRow = folderRow(root, { root: true });
-  const children = document.createElement('div'); children.className = 'folder-tree-children';
-  const content = document.createElement('div'); content.className = 'folder-tree-children-content';
-  if (folders.length) content.append(...folders.map((folder) => folderRow(folder)));
-  else {
-    const empty = document.createElement('p'); empty.className = 'folder-tree-empty';
-    empty.textContent = state.query ? '검색 결과가 없습니다.' : '하위 폴더가 없습니다.';
-    content.append(empty);
-  }
-  children.append(content);
-  folderList.classList.toggle('is-collapsed', state.foldersCollapsed && folders.length > 0);
-  rootRow.querySelector('.folder-open').setAttribute('aria-expanded', String(!(state.foldersCollapsed && folders.length > 0)));
-  folderList.replaceChildren(rootRow, children);
-  fileList.replaceChildren(...(files.length ? [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
-  $('#folder-count').textContent = `${folders.length}개`;
-  $('#file-count').textContent = `${files.length}개`;
-  $('#files-title').textContent = `${root.name}의 파일`;
-  $('#collapse-folders-button').textContent = state.foldersCollapsed ? '모두 펼치기' : '모두 접기';
-  $('#collapse-folders-button').disabled = folders.length === 0;
+function allFolderPaths(folders = state.folderTree) {
+  return folders.flatMap((folder) => [folder.path, ...allFolderPaths(folder.children)]);
 }
 
-function setFoldersCollapsed(collapsed) {
-  state.foldersCollapsed = collapsed;
+function renderFolderTree() {
   const folderList = $('#folder-list');
-  const hasChildren = state.directory.folders.some((folder) => nameMatches(folder.name));
-  folderList.classList.toggle('is-collapsed', collapsed && hasChildren);
-  folderList.querySelector('.root-folder .folder-open')?.setAttribute('aria-expanded', String(!(collapsed && hasChildren)));
-  $('#collapse-folders-button').textContent = collapsed ? '모두 펼치기' : '모두 접기';
+  const root = { name: '내 파일', path: '', children: state.folderTree };
+  folderList.replaceChildren(folderNode(root, 0, { root: true }));
+  const folderCount = allFolderPaths().length;
+  $('#folder-count').textContent = `${folderCount}개`;
+  $('#collapse-folders-button').textContent = state.expandedFolderPaths.has('') ? '모두 접기' : '모두 펼치기';
+  $('#collapse-folders-button').disabled = folderCount === 0;
+}
+
+function renderFileList() {
+  const files = state.directory.files.filter((file) => nameMatches(file.name));
+  const fileList = $('#file-list');
+  fileList.replaceChildren(...(files.length ? [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
+  $('#file-count').textContent = `${files.length}개`;
+  $('#files-title').textContent = `${pathParts(state.currentPath).at(-1) ?? '내 파일'}의 파일`;
+}
+
+function folderTreeNode(path) {
+  return [...$('#folder-list').querySelectorAll('.folder-tree-node')].find((node) => node.dataset.folderPath === path);
+}
+
+function setFolderExpanded(path, expanded) {
+  const node = folderTreeNode(path);
+  if (!node) return;
+  state.expandedFolderPaths[expanded ? 'add' : 'delete'](path);
+  node.classList.toggle('is-expanded', expanded);
+  const toggle = node.querySelector(':scope > .folder-tree-row .folder-toggle');
+  toggle?.setAttribute('aria-expanded', String(expanded));
+  toggle?.setAttribute('aria-label', `${node.querySelector(':scope > .folder-tree-row .item-name')?.textContent ?? '폴더'} ${expanded ? '접기' : '펼치기'}`);
+  $('#collapse-folders-button').textContent = state.expandedFolderPaths.has('') ? '모두 접기' : '모두 펼치기';
+}
+
+function syncFolderTreeState() {
+  $('#folder-list').querySelectorAll('.folder-tree-node').forEach((node) => {
+    const path = node.dataset.folderPath;
+    const expanded = state.expandedFolderPaths.has(path);
+    node.classList.toggle('is-expanded', expanded);
+    node.classList.toggle('is-active', path === state.currentPath);
+    const toggle = node.querySelector(':scope > .folder-tree-row .folder-toggle');
+    if (!toggle || toggle.disabled) return;
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.setAttribute('aria-label', `${node.querySelector(':scope > .folder-tree-row .item-name')?.textContent ?? '폴더'} ${expanded ? '접기' : '펼치기'}`);
+  });
+  $('#collapse-folders-button').textContent = state.expandedFolderPaths.has('') ? '모두 접기' : '모두 펼치기';
+}
+
+function setAllFoldersExpanded(expanded) {
+  state.expandedFolderPaths = new Set(expanded ? ['', ...allFolderPaths()] : []);
+  syncFolderTreeState();
+}
+
+function expandFolderAncestors(path) {
+  state.expandedFolderPaths.add('');
+  pathParts(path).reduce((ancestor, part) => {
+    const next = ancestor ? `${ancestor}/${part}` : part;
+    state.expandedFolderPaths.add(next);
+    return next;
+  }, '');
+}
+
+async function loadFolderTree() {
+  const data = await request('/api/folders/tree', { headers: {} });
+  state.folderTree = data.folders;
+  expandFolderAncestors(state.currentPath);
+  renderFolderTree();
 }
 
 async function loadFolder(path = state.currentPath) {
-  setStatus('불러오는 중…');
   try {
     const data = await request(`/api/folders?${new URLSearchParams({ path })}`, { headers: {} });
     state.currentPath = data.path;
-    state.directory = { folders: data.folders, files: data.files };
-    renderBreadcrumbs(); renderDirectory(); setStatus('');
+    expandFolderAncestors(data.path);
+    state.directory = { files: data.files };
+    renderBreadcrumbs(); renderFileList();
+    syncFolderTreeState();
+    setStatus('');
   } catch (error) { setStatus(error.message, true); }
 }
 
@@ -209,7 +271,7 @@ function setView(view) {
   const grid = view === 'grid';
   $('#grid-view-button').classList.toggle('active', grid); $('#list-view-button').classList.toggle('active', !grid);
   $('#grid-view-button').setAttribute('aria-pressed', String(grid)); $('#list-view-button').setAttribute('aria-pressed', String(!grid));
-  renderDirectory();
+  renderFileList();
 }
 
 function renderStorage(storage) {
@@ -281,8 +343,8 @@ $('#logout-button').addEventListener('click', async () => {
 });
 $('#up-button').addEventListener('click', () => loadFolder(parentPath()));
 $('#new-folder-button').addEventListener('click', openFolderDialog);
-$('#collapse-folders-button').addEventListener('click', () => setFoldersCollapsed(!state.foldersCollapsed));
-$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); renderDirectory(); });
+$('#collapse-folders-button').addEventListener('click', () => setAllFoldersExpanded(!state.expandedFolderPaths.has('')));
+$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); renderFileList(); });
 $('#grid-view-button').addEventListener('click', () => setView('grid'));
 $('#list-view-button').addEventListener('click', () => setView('list'));
 $('#file-input').addEventListener('change', async (event) => { await uploadSelectedFile(event.target.files?.[0]); event.target.value = ''; });
@@ -296,7 +358,7 @@ $('#folder-form').addEventListener('submit', async (event) => {
   event.preventDefault(); $('#folder-error').textContent = '';
   try {
     await request('/api/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parentPath: state.currentPath, name: $('#folder-name').value.trim() }) });
-    $('#folder-dialog').close(); await loadFolder(); setStatus('폴더를 만들었습니다.');
+    $('#folder-dialog').close(); await loadFolder(); await loadFolderTree(); setStatus('폴더를 만들었습니다.');
   } catch (error) { $('#folder-error').textContent = error.message; }
 });
 $('#delete-form').addEventListener('submit', async (event) => {
@@ -305,14 +367,16 @@ $('#delete-form').addEventListener('submit', async (event) => {
   try {
     const confirmation = await request('/api/auth/reauthenticate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('#delete-password').value }) });
     await request('/api/folders', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: state.pendingDeletePath, reauthenticationToken: confirmation.token }) });
-    $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus('폴더와 그 안의 파일을 삭제했습니다.');
+    const currentWasDeleted = state.currentPath === state.pendingDeletePath || state.currentPath.startsWith(`${state.pendingDeletePath}/`);
+    $('#delete-dialog').close(); await loadFolder(currentWasDeleted ? parentPath(state.pendingDeletePath) : state.currentPath); await loadFolderTree(); await refreshStorageAfterMutation(); setStatus('폴더와 그 안의 파일을 삭제했습니다.');
   } catch (error) { $('#delete-error').textContent = error.message; } finally { button.disabled = false; }
 });
 
 async function showApp() {
   $('#current-user').textContent = `${state.user.username} (${state.user.role})`;
   $('#login-panel').hidden = true; $('#app-panel').hidden = false;
-  await Promise.all([loadFolder(''), loadStorage()]);
+  await loadFolder('');
+  await Promise.all([loadFolderTree(), loadStorage()]);
 }
 
 try { const data = await request('/api/auth/me', { headers: {} }); state.user = data.user; showApp(); } catch { /* Anonymous visitors intentionally see the login screen. */ }
