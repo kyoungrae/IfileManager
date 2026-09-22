@@ -164,13 +164,34 @@ function renderDirectory() {
   const files = state.directory.files.filter((file) => nameMatches(file.name));
   const folderList = $('#folder-list'); const fileList = $('#file-list');
   const root = { name: pathParts(state.currentPath).at(-1) ?? '내 파일', path: parentPath() };
-  const folderRows = state.foldersCollapsed ? [folderRow(root, { root: true })] : [folderRow(root, { root: true }), ...folders.map((folder) => folderRow(folder))];
-  folderList.replaceChildren(...(folders.length || !state.query ? folderRows : [emptySearch('폴더')]));
+  const rootRow = folderRow(root, { root: true });
+  const children = document.createElement('div'); children.className = 'folder-tree-children';
+  const content = document.createElement('div'); content.className = 'folder-tree-children-content';
+  if (folders.length) content.append(...folders.map((folder) => folderRow(folder)));
+  else {
+    const empty = document.createElement('p'); empty.className = 'folder-tree-empty';
+    empty.textContent = state.query ? '검색 결과가 없습니다.' : '하위 폴더가 없습니다.';
+    content.append(empty);
+  }
+  children.append(content);
+  folderList.classList.toggle('is-collapsed', state.foldersCollapsed && folders.length > 0);
+  rootRow.querySelector('.folder-open').setAttribute('aria-expanded', String(!(state.foldersCollapsed && folders.length > 0)));
+  folderList.replaceChildren(rootRow, children);
   fileList.replaceChildren(...(files.length ? [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
   $('#folder-count').textContent = `${folders.length}개`;
   $('#file-count').textContent = `${files.length}개`;
   $('#files-title').textContent = `${root.name}의 파일`;
   $('#collapse-folders-button').textContent = state.foldersCollapsed ? '모두 펼치기' : '모두 접기';
+  $('#collapse-folders-button').disabled = folders.length === 0;
+}
+
+function setFoldersCollapsed(collapsed) {
+  state.foldersCollapsed = collapsed;
+  const folderList = $('#folder-list');
+  const hasChildren = state.directory.folders.some((folder) => nameMatches(folder.name));
+  folderList.classList.toggle('is-collapsed', collapsed && hasChildren);
+  folderList.querySelector('.root-folder .folder-open')?.setAttribute('aria-expanded', String(!(collapsed && hasChildren)));
+  $('#collapse-folders-button').textContent = collapsed ? '모두 펼치기' : '모두 접기';
 }
 
 async function loadFolder(path = state.currentPath) {
@@ -194,15 +215,16 @@ function setView(view) {
 function renderStorage(storage) {
   const total = storage.totalBytes; const free = storage.freeBytes; const used = storage.usedBytes;
   const freePercent = total ? Math.min(100, Math.max(0, Math.round((free / total) * 100))) : 0;
-  $('#storage-ring').style.setProperty('--storage-progress', freePercent);
-  $('#storage-percent').textContent = `${freePercent}%`;
+  const usedPercent = 100 - freePercent;
+  $('#storage-ring').style.setProperty('--storage-progress', usedPercent);
+  $('#storage-percent').textContent = `${usedPercent}%`;
   $('#storage-free').textContent = formatStorageSize(free);
   $('#storage-total').textContent = `/ ${formatStorageSize(total)}`;
   $('#storage-used').textContent = formatStorageSize(used);
   $('#storage-free-detail').textContent = formatStorageSize(free);
-  $('#mini-storage-ring').style.setProperty('--storage-progress', freePercent);
-  $('#mini-storage-percent').textContent = `${freePercent}%`;
-  $('#mini-storage-value').textContent = `${formatStorageSize(free)} / ${formatStorageSize(total)}  ${freePercent}%`;
+  $('#mini-storage-ring').style.setProperty('--storage-progress', usedPercent);
+  $('#mini-storage-percent').textContent = `${usedPercent}%`;
+  $('#mini-storage-value').textContent = `사용 ${formatStorageSize(used)} / ${formatStorageSize(total)}  ${usedPercent}%`;
 }
 
 async function loadStorage() {
@@ -259,7 +281,7 @@ $('#logout-button').addEventListener('click', async () => {
 });
 $('#up-button').addEventListener('click', () => loadFolder(parentPath()));
 $('#new-folder-button').addEventListener('click', openFolderDialog);
-$('#collapse-folders-button').addEventListener('click', () => { state.foldersCollapsed = !state.foldersCollapsed; renderDirectory(); });
+$('#collapse-folders-button').addEventListener('click', () => setFoldersCollapsed(!state.foldersCollapsed));
 $('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); renderDirectory(); });
 $('#grid-view-button').addEventListener('click', () => setView('grid'));
 $('#list-view-button').addEventListener('click', () => setView('list'));
