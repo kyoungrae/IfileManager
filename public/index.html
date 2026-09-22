@@ -27,6 +27,7 @@
           <div class="brand" aria-label="파일 관리자"><span class="brand-mark" data-icon="folder" aria-hidden="true"></span><span class="visually-hidden">파일 관리자</span></div>
           <nav class="side-nav" aria-label="주요 메뉴">
             <button class="side-nav-item active" type="button" aria-current="page" aria-label="내 파일" data-tooltip="내 파일" data-nav="files"><span class="nav-icon" data-icon="folder"></span></button>
+            <button class="side-nav-item" type="button" aria-label="V4Log" data-tooltip="V4Log" data-nav="v4log"><span class="nav-icon" data-icon="file-up"></span></button>
             <button class="side-nav-item" type="button" aria-label="최근 항목" data-tooltip="최근 항목" data-nav="recent"><span class="nav-icon" data-icon="clock"></span></button>
             <button class="side-nav-item" type="button" aria-label="즐겨찾기" data-tooltip="즐겨찾기" data-nav="favorites"><span class="nav-icon" data-icon="star"></span></button>
           </nav>
@@ -47,8 +48,8 @@
               <div class="toolbar-actions">
                 <button class="quiet icon-button" id="up-button" type="button"><span data-icon="arrow-up" aria-hidden="true"></span><span>상위 폴더</span></button>
                 <button class="outline-button" id="new-folder-button" type="button"><span data-icon="folder-plus" aria-hidden="true"></span><span>새 폴더</span></button>
-                <label class="upload-button"><span data-icon="upload" aria-hidden="true"></span><span>파일 업로드</span><input id="file-input" type="file"></label>
-                <div class="view-switch" role="group" aria-label="보기 방식">
+                <label class="upload-button" id="toolbar-upload"><span data-icon="upload" aria-hidden="true"></span><span>파일 업로드</span><input id="file-input" type="file"></label>
+                <div class="view-switch" id="view-switch" role="group" aria-label="보기 방식">
                   <button class="view-button active" id="grid-view-button" type="button" aria-label="격자 보기" aria-pressed="true"><span data-icon="grid" aria-hidden="true"></span></button>
                   <button class="view-button" id="list-view-button" type="button" aria-label="목록 보기" aria-pressed="false"><span data-icon="list" aria-hidden="true"></span></button>
                 </div>
@@ -56,7 +57,7 @@
             </section>
             <p id="status" class="status" role="status"></p>
             <nav id="breadcrumbs" class="breadcrumbs" aria-label="현재 폴더"></nav>
-            <div class="library-layout" aria-live="polite">
+            <div class="library-layout" id="library-layout" aria-live="polite">
               <section class="content-section folder-section"><div class="section-heading"><h2>폴더</h2><span id="folder-count">0개</span><button class="collapse-button" id="collapse-folders-button" type="button">모두 접기</button></div><div id="folder-list" class="folder-tree" role="tree"></div></section>
               <aside class="storage-card" aria-label="저장소 상세">
                 <h2>저장소</h2>
@@ -65,14 +66,16 @@
                 <dl class="storage-legend"><div><dt><span class="legend-dot used"></span>사용된 공간</dt><dd id="storage-used">0 B</dd></div><div><dt><span class="legend-dot free"></span>남은 저장 공간</dt><dd id="storage-free-detail">0 B</dd></div></dl>
               </aside>
             </div>
-            <section class="content-section files-section" aria-live="polite"><div class="section-heading"><h2 id="files-title">내 파일의 파일</h2><span id="file-count">0개</span></div><div id="file-list" class="file-list" role="table"></div></section>
+            <section class="content-section files-section" id="files-section" aria-live="polite"><div class="section-heading"><h2 id="files-title">내 파일의 파일</h2><span id="file-count">0개</span></div><div id="file-list" class="file-list" role="table"></div></section>
             <section id="upload-drop-zone" class="upload-dropbar" tabindex="0" aria-label="파일 업로드 영역"><span class="dropbar-icon" data-icon="upload" aria-hidden="true"></span><div><strong>파일을 끌어놓거나 업로드하세요</strong><span>업로드한 파일은 암호화되어 저장됩니다.</span></div><button class="outline-button" id="drop-upload-button" type="button"><span data-icon="upload" aria-hidden="true"></span>파일 선택</button></section>
+            <section id="v4-log-section" class="content-section files-section v4-log-section" aria-live="polite" hidden><div class="section-heading"><h2 id="v4-log-title">V4Log</h2><span id="v4-log-count">0개</span><span class="read-only-label">읽기 전용</span></div><div id="v4-log-list" class="file-list" role="table"></div></section>
           </div>
         </section>
       </section>
     </main>
 
     <dialog id="folder-dialog"><form method="dialog" id="folder-form"><p class="dialog-eyebrow">새 폴더</p><h2>폴더를 만들까요?</h2><label>폴더 이름<input id="folder-name" maxlength="120" required autofocus></label><p class="subtle">한글·영문·숫자와 공백, 점, 밑줄, 괄호, 하이픈을 사용할 수 있습니다.</p><p id="folder-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="folder-submit" value="default">만들기</button></div></form></dialog>
+    <dialog id="rename-folder-dialog"><form method="dialog" id="rename-folder-form"><p class="dialog-eyebrow">이름 변경</p><h2 id="rename-folder-title">폴더 이름을 바꿀까요?</h2><label>새 폴더 이름<input id="rename-folder-name" maxlength="120" required autofocus></label><p class="subtle">하위 폴더와 파일은 그대로 유지됩니다.</p><p id="rename-folder-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="rename-folder-submit" value="default">변경</button></div></form></dialog>
     <dialog id="delete-dialog"><form method="dialog" id="delete-form"><p class="danger-label">삭제 확인</p><h2 id="delete-title">삭제할까요?</h2><p id="delete-description" class="subtle"></p><label>현재 비밀번호<input id="delete-password" type="password" autocomplete="current-password" required></label><p id="delete-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="delete-submit" class="danger" value="default">영구 삭제</button></div></form></dialog>
     <script type="module" src="/app.js"></script>
   </body>

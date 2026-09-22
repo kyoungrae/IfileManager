@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
@@ -57,6 +58,59 @@ function clientFilename(name) {
   return result;
 }
 
+function parentRelativePath(relativePath) {
+  const parts = relativePath.split('/');
+  parts.pop();
+  return parts.join('/');
+}
+
+function replacePathPrefix(relativePath, oldPrefix, newPrefix) {
+  return relativePath === oldPrefix ? newPrefix : `${newPrefix}${relativePath.slice(oldPrefix.length)}`;
+}
+
+function normalizeV4LogPath(input) {
+  if (input === undefined || input === null || input === '') return '';
+  if (typeof input !== 'string' || input.includes('\u0000') || path.isAbsolute(input)) throw new Error('Invalid V4 log path');
+  const normalized = path.posix.normalize(input.replaceAll('\\', '/'));
+  if (normalized === '.' || normalized === '') return '';
+  if (normalized === '..' || normalized.startsWith('../')) throw new Error('V4 log path escapes its root');
+  return normalized;
+}
+
+async function existingV4LogEntry(relativePath, { directoryOnly = false } = {}) {
+  const normalized = normalizeV4LogPath(relativePath);
+  let absolutePath = config.v4LogRoot;
+  let stat = await fs.lstat(absolutePath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('V4 log root is unavailable');
+  for (const segment of normalized ? normalized.split('/') : []) {
+    absolutePath = path.join(absolutePath, segment);
+    stat = await fs.lstat(absolutePath);
+    if (stat.isSymbolicLink()) throw new Error('V4 log symbolic links are not allowed');
+  }
+  if (directoryOnly && !stat.isDirectory()) throw new Error('V4 log directory does not exist');
+  return { absolutePath, normalized, stat };
+}
+
+async function listV4LogEntries(relativePath) {
+  const current = await existingV4LogEntry(relativePath, { directoryOnly: true });
+  const directoryEntries = await fs.readdir(current.absolutePath, { withFileTypes: true });
+  const entries = await Promise.all(directoryEntries
+    .filter((entry) => (entry.isDirectory() || entry.isFile()) && !entry.isSymbolicLink())
+    .map(async (entry) => {
+      const entryPath = relativeChild(current.normalized, entry.name);
+      const stat = await fs.lstat(path.join(current.absolutePath, entry.name));
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) return null;
+      return {
+        name: entry.name,
+        path: entryPath,
+        type: stat.isDirectory() ? 'directory' : 'file',
+        size: stat.isFile() ? stat.size : 0,
+        modifiedAt: stat.mtime.toISOString()
+      };
+    }));
+  return { path: current.normalized, entries: entries.filter(Boolean).sort((left, right) => (left.type === right.type ? left.name.localeCompare(right.name, 'ko') : left.type === 'directory' ? -1 : 1)) };
+}
+
 async function readFolderTree() {
   const folders = await ManagedFolder.find({}).lean();
   const namesByPath = new Map();
@@ -113,6 +167,20 @@ app.get('/api/auth/me', requireAuth, (request, response) => response.json({ user
 
 app.get('/api/storage', requireAuth, asyncRoute(async (_request, response) => {
   response.json(await storageUsage());
+}));
+
+app.get('/api/v4-logs', requireAuth, asyncRoute(async (request, response) => {
+  response.json(await listV4LogEntries(request.query.path));
+}));
+
+app.get('/api/v4-logs/download', requireAuth, asyncRoute(async (request, response, next) => {
+  const target = await existingV4LogEntry(request.query.path);
+  if (!target.stat.isFile()) return response.status(400).json({ error: 'V4 log path is not a file' });
+  const name = clientFilename(path.basename(target.absolutePath));
+  response.set({ 'Content-Type': 'application/octet-stream', 'Content-Length': String(target.stat.size), 'Cache-Control': 'no-store' });
+  response.attachment(name);
+  await audit(request.user.id, 'v4-log.download', target.normalized, { bytes: target.stat.size });
+  createReadStream(target.absolutePath).on('error', next).pipe(response);
 }));
 
 app.get('/api/folders/tree', requireAuth, asyncRoute(async (_request, response) => {
@@ -176,6 +244,60 @@ app.post('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (reque
     throw error;
   }
   response.status(201).json({ name, path: folderPath });
+}));
+
+app.patch('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
+  const target = await existingDirectory(request.body?.path);
+  if (!target.normalized) return response.status(400).json({ error: 'The managed storage root cannot be renamed' });
+  const name = validateFolderName(request.body?.name);
+  const parent = await existingDirectory(parentRelativePath(target.normalized));
+  const renamedPath = relativeChild(parent.normalized, name);
+  if (renamedPath === target.normalized) return response.json({ name, path: renamedPath });
+
+  const renamedAbsolutePath = path.join(parent.absolutePath, name);
+  try {
+    await fs.lstat(renamedAbsolutePath);
+    const error = new Error('A folder with that name already exists'); error.code = 'EEXIST'; throw error;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const paths = await collectDirectoryPaths(target.normalized);
+  const pathKeys = paths.map(keyForPath);
+  const pathByKey = new Map(paths.map((folderPath) => [keyForPath(folderPath), folderPath]));
+  const [folders, files] = await Promise.all([
+    ManagedFolder.find({ pathKey: { $in: pathKeys } }).lean(),
+    ManagedFile.find({ folderPathKey: { $in: pathKeys } }).lean()
+  ]);
+  const folderUpdates = folders.flatMap((folder) => {
+    const oldPath = pathByKey.get(folder.pathKey);
+    if (!oldPath) return [];
+    const newPath = replacePathPrefix(oldPath, target.normalized, renamedPath);
+    const update = {
+      pathKey: keyForPath(newPath),
+      parentPathKey: keyForPath(parentRelativePath(newPath)),
+      pathEncrypted: seal(newPath)
+    };
+    if (oldPath === target.normalized) update.nameEncrypted = seal(name);
+    return [{ updateOne: { filter: { _id: folder._id }, update: { $set: update } } }];
+  });
+  const fileUpdates = files.flatMap((file) => {
+    const oldFolderPath = pathByKey.get(file.folderPathKey);
+    if (!oldFolderPath) return [];
+    const newFolderPath = replacePathPrefix(oldFolderPath, target.normalized, renamedPath);
+    return [{ updateOne: { filter: { _id: file._id }, update: { $set: { folderPathKey: keyForPath(newFolderPath) } } } }];
+  });
+
+  await fs.rename(target.absolutePath, renamedAbsolutePath);
+  try {
+    await audit(request.user.id, 'folder.rename', target.normalized, { renamedPath, foldersUpdated: folderUpdates.length, filesUpdated: fileUpdates.length });
+    if (folderUpdates.length) await ManagedFolder.bulkWrite(folderUpdates);
+    if (fileUpdates.length) await ManagedFile.bulkWrite(fileUpdates);
+  } catch (error) {
+    await fs.rename(renamedAbsolutePath, target.absolutePath).catch(() => undefined);
+    throw error;
+  }
+  response.json({ name, path: renamedPath });
 }));
 
 app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {

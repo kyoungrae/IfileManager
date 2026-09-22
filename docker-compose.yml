@@ -9,6 +9,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATA_ROOT: /data
+      V4_LOG_ROOT: /v4-logs
       MONGODB_URI: ${MONGODB_URI:?Set MONGODB_URI in the deployment env file}
       DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY in the deployment env file}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in the deployment env file}
@@ -21,6 +22,8 @@ services:
       - "${PUBLIC_BIND_IP:-127.0.0.1}:${APP_PORT:-4300}:3000"
     volumes:
       - "${REMOVABLE_DISK_PATH:?Set REMOVABLE_DISK_PATH in .env}/ifile-manager:/data"
+      # V4 strategy logs are intentionally exposed read-only.
+      - "${V4_LOG_HOST_PATH:-/Volumes/SeagateBackup/AlphaPulse-coin-shadow/V4}:/v4-logs:ro"
       # macOS host agent writes real volume capacity here; Docker's statfs is virtualized.
       - "/tmp/ifile-manager:/run/ifile-manager:ro"
     # Allows host.docker.internal to work on Linux too. On Docker Desktop it is built in.

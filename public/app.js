@@ -2,10 +2,13 @@ const state = {
   user: null,
   currentPath: '',
   pendingDelete: null,
+  pendingRename: null,
   directory: { files: [] },
   folderTree: [],
   expandedFolderPaths: new Set(['']),
   fileListTransitionId: 0,
+  section: 'files',
+  v4Logs: { path: '', entries: [] },
   query: '',
   view: 'grid'
 };
@@ -98,6 +101,21 @@ function renderBreadcrumbs() {
   $('#up-button').disabled = !state.currentPath;
 }
 
+function renderV4LogBreadcrumbs() {
+  const target = $('#breadcrumbs'); target.replaceChildren();
+  const crumbs = [{ name: 'V4Log', path: '' }];
+  pathParts(state.v4Logs.path).forEach((name, index, parts) => crumbs.push({ name, path: parts.slice(0, index + 1).join('/') }));
+  crumbs.forEach((crumb, index) => {
+    if (index) {
+      const divider = document.createElement('span'); divider.className = 'breadcrumb-divider'; divider.textContent = '›'; target.append(divider);
+    }
+    const button = document.createElement('button'); button.className = 'crumb'; button.type = 'button'; button.textContent = crumb.name;
+    button.addEventListener('click', () => loadV4Logs(crumb.path)); target.append(button);
+  });
+  $('#page-location').textContent = pathParts(state.v4Logs.path).at(-1) ?? 'V4Log';
+  $('#up-button').disabled = !state.v4Logs.path;
+}
+
 function folderNode(folder, depth = 0, { root = false } = {}) {
   const node = document.createElement('div');
   node.className = `folder-tree-node${root ? ' root-node' : ''}`;
@@ -123,8 +141,10 @@ function folderNode(folder, depth = 0, { root = false } = {}) {
   open.append(icon, name); open.addEventListener('click', () => loadFolder(folder.path));
   row.append(toggle, open);
   if (!root) {
+    const actions = document.createElement('div'); actions.className = 'folder-actions';
+    const rename = document.createElement('button'); rename.className = 'rename-folder'; rename.type = 'button'; rename.textContent = '이름 변경'; rename.addEventListener('click', () => openFolderRenameDialog(folder));
     const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.textContent = '삭제'; remove.addEventListener('click', () => openFolderDeleteDialog(folder));
-    row.append(remove);
+    actions.append(rename, remove); row.append(actions);
   }
 
   const children = document.createElement('div'); children.className = 'folder-tree-children';
@@ -219,6 +239,47 @@ async function renderFileList({ animate = false } = {}) {
   else fileList.classList.remove('is-changing');
 }
 
+function v4LogTableHeader() {
+  const row = document.createElement('article'); row.className = 'file-row file-header'; row.setAttribute('role', 'row');
+  const type = document.createElement('span'); type.className = 'v4-log-type';
+  const name = document.createElement('span'); name.textContent = '이름';
+  const modified = document.createElement('span'); modified.textContent = '수정한 날짜';
+  const size = document.createElement('span'); size.textContent = '크기';
+  const actions = document.createElement('span'); actions.textContent = '작업';
+  row.append(type, name, modified, size, actions); return row;
+}
+
+function v4LogRow(entry) {
+  const row = document.createElement('article'); row.className = 'file-row v4-log-row'; row.setAttribute('role', 'row');
+  const type = svgIcon(entry.type === 'directory' ? 'folder' : 'file-up', 'v4-log-type');
+  const name = document.createElement(entry.type === 'directory' ? 'button' : 'span'); name.className = `file-name${entry.type === 'directory' ? ' v4-log-folder' : ''}`; name.append(document.createTextNode(entry.name));
+  if (entry.type === 'directory') { name.type = 'button'; name.addEventListener('click', () => loadV4Logs(entry.path)); }
+  const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.modifiedAt));
+  const size = document.createElement('span'); size.className = 'file-size'; size.textContent = entry.type === 'directory' ? '폴더' : formatSize(entry.size);
+  const actions = document.createElement('div'); actions.className = 'file-actions';
+  if (entry.type === 'directory') {
+    const open = document.createElement('button'); open.className = 'log-open'; open.type = 'button'; open.textContent = '열기'; open.addEventListener('click', () => loadV4Logs(entry.path)); actions.append(open);
+  } else {
+    const download = document.createElement('a'); download.className = 'download'; download.href = `/api/v4-logs/download?${new URLSearchParams({ path: entry.path })}`; download.textContent = '다운로드'; actions.append(download);
+  }
+  row.append(type, name, metadata, size, actions); return row;
+}
+
+function emptyV4Logs() {
+  const panel = document.createElement('section'); panel.className = 'empty-panel file-empty';
+  const title = document.createElement('h3'); title.textContent = '표시할 V4 로그가 없습니다.';
+  const description = document.createElement('p'); description.textContent = '이 위치는 읽기 전용입니다.';
+  panel.append(title, description); return panel;
+}
+
+function renderV4LogList() {
+  const entries = state.v4Logs.entries.filter((entry) => nameMatches(entry.name));
+  const list = $('#v4-log-list');
+  list.replaceChildren(...(entries.length ? [v4LogTableHeader(), ...entries.map(v4LogRow)] : [state.query ? emptySearch('V4 로그') : emptyV4Logs()]));
+  $('#v4-log-count').textContent = `${entries.length}개`;
+  $('#v4-log-title').textContent = state.v4Logs.path ? `${pathParts(state.v4Logs.path).at(-1)}의 V4Log` : 'V4Log';
+}
+
 function folderTreeNode(path) {
   return [...$('#folder-list').querySelectorAll('.folder-tree-node')].find((node) => node.dataset.folderPath === path);
 }
@@ -281,6 +342,45 @@ async function loadFolder(path = state.currentPath, { animate = true } = {}) {
   } catch (error) { setStatus(error.message, true); }
 }
 
+function setWorkspaceSection(section) {
+  state.section = section;
+  const isV4Log = section === 'v4log';
+  $('#library-layout').hidden = isV4Log;
+  $('#files-section').hidden = isV4Log;
+  $('#upload-drop-zone').hidden = isV4Log;
+  $('#v4-log-section').hidden = !isV4Log;
+  $('#new-folder-button').hidden = isV4Log;
+  $('#toolbar-upload').hidden = isV4Log;
+  $('#view-switch').hidden = isV4Log;
+  $('#file-search').placeholder = isV4Log ? 'V4 로그 파일명으로 검색하세요.' : '파일명으로 검색하세요.';
+  document.querySelectorAll('.side-nav-item').forEach((button) => {
+    const active = button.dataset.nav === section;
+    button.classList.toggle('active', active);
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+}
+
+async function loadV4Logs(path = state.v4Logs.path) {
+  try {
+    const data = await request(`/api/v4-logs?${new URLSearchParams({ path })}`, { headers: {} });
+    state.v4Logs = { path: data.path, entries: data.entries };
+    renderV4LogBreadcrumbs(); renderV4LogList(); setStatus('');
+  } catch (error) { setStatus(error.message, true); }
+}
+
+async function showFiles() {
+  state.query = ''; $('#file-search').value = '';
+  setWorkspaceSection('files');
+  await loadFolder(state.currentPath);
+}
+
+async function showV4Logs() {
+  state.query = ''; $('#file-search').value = '';
+  setWorkspaceSection('v4log');
+  await loadV4Logs(state.v4Logs.path);
+}
+
 function setView(view) {
   state.view = view;
   const grid = view === 'grid';
@@ -312,6 +412,15 @@ async function loadStorage() {
 
 function openFolderDialog() {
   $('#folder-form').reset(); $('#folder-error').textContent = ''; $('#folder-dialog').showModal();
+}
+
+function openFolderRenameDialog(folder) {
+  state.pendingRename = { path: folder.path, name: folder.name };
+  $('#rename-folder-title').textContent = `“${folder.name}” 폴더의 이름을 바꿀까요?`;
+  $('#rename-folder-name').value = folder.name;
+  $('#rename-folder-error').textContent = '';
+  $('#rename-folder-dialog').showModal();
+  $('#rename-folder-name').select();
 }
 
 function openFolderDeleteDialog(folder) {
@@ -367,17 +476,22 @@ $('#login-form').addEventListener('submit', async (event) => {
 $('#logout-button').addEventListener('click', async () => {
   try { await request('/api/auth/logout', { method: 'POST' }); } finally { state.user = null; $('#app-panel').hidden = true; $('#login-panel').hidden = false; $('#login-form').reset(); }
 });
-$('#up-button').addEventListener('click', () => loadFolder(parentPath()));
+$('#up-button').addEventListener('click', () => {
+  if (state.section === 'v4log') loadV4Logs(parentPath(state.v4Logs.path));
+  else loadFolder(parentPath());
+});
 $('#new-folder-button').addEventListener('click', openFolderDialog);
 $('#collapse-folders-button').addEventListener('click', () => setAllFoldersExpanded(!state.expandedFolderPaths.has('')));
-$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); renderFileList(); });
+$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); if (state.section === 'v4log') renderV4LogList(); else renderFileList(); });
 $('#grid-view-button').addEventListener('click', () => setView('grid'));
 $('#list-view-button').addEventListener('click', () => setView('list'));
 $('#file-input').addEventListener('change', async (event) => { await uploadSelectedFile(event.target.files?.[0]); event.target.value = ''; });
 
 document.querySelectorAll('dialog button[value="cancel"]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 document.querySelectorAll('.side-nav-item').forEach((button) => button.addEventListener('click', () => {
-  if (button.dataset.nav !== 'files') setStatus('이 메뉴는 다음 업데이트에서 제공됩니다. 현재는 내 파일을 사용할 수 있습니다.');
+  if (button.dataset.nav === 'files') void showFiles();
+  else if (button.dataset.nav === 'v4log') void showV4Logs();
+  else setStatus('이 메뉴는 다음 업데이트에서 제공됩니다. 현재는 내 파일과 V4Log를 사용할 수 있습니다.');
 }));
 
 $('#folder-form').addEventListener('submit', async (event) => {
@@ -386,6 +500,19 @@ $('#folder-form').addEventListener('submit', async (event) => {
     await request('/api/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parentPath: state.currentPath, name: $('#folder-name').value.trim() }) });
     $('#folder-dialog').close(); await loadFolder(); await loadFolderTree(); setStatus('폴더를 만들었습니다.');
   } catch (error) { $('#folder-error').textContent = error.message; }
+});
+$('#rename-folder-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); $('#rename-folder-error').textContent = '';
+  const button = $('#rename-folder-submit'); button.disabled = true;
+  try {
+    const pending = state.pendingRename;
+    if (!pending) throw new Error('이름을 변경할 폴더를 찾지 못했습니다.');
+    const data = await request('/api/folders', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: pending.path, name: $('#rename-folder-name').value.trim() }) });
+    const currentWasRenamed = state.currentPath === pending.path || state.currentPath.startsWith(`${pending.path}/`);
+    const nextPath = currentWasRenamed ? `${data.path}${state.currentPath.slice(pending.path.length)}` : state.currentPath;
+    $('#rename-folder-dialog').close(); await loadFolder(nextPath); await loadFolderTree(); setStatus('폴더 이름을 변경했습니다.');
+    state.pendingRename = null;
+  } catch (error) { $('#rename-folder-error').textContent = error.message; } finally { button.disabled = false; }
 });
 $('#delete-form').addEventListener('submit', async (event) => {
   event.preventDefault(); $('#delete-error').textContent = '';
@@ -409,6 +536,7 @@ $('#delete-form').addEventListener('submit', async (event) => {
 async function showApp() {
   $('#current-user').textContent = `${state.user.username} (${state.user.role})`;
   $('#login-panel').hidden = true; $('#app-panel').hidden = false;
+  setWorkspaceSection('files');
   await loadFolder('');
   await Promise.all([loadFolderTree(), loadStorage()]);
 }

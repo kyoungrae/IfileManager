@@ -82,6 +82,10 @@ sh scripts/install-storage-stats-agent.sh
 
 설치 스크립트는 `.env`에서 `REMOVABLE_DISK_PATH`만 읽으며 다른 비밀값은 읽거나 출력하지 않습니다. 갱신 파일은 호스트의 `/tmp/ifile-manager/storage-stats.json`에 저장되고 읽기 전용으로 컨테이너에 마운트됩니다. 호스트 통계가 없거나 유효하지 않으면 앱은 Docker 가상 디스크 용량을 대신 표시하지 않고 `0 B`로 표시합니다.
 
+### V4Log 읽기 전용 메뉴
+
+V4Log 메뉴는 기본적으로 `/Volumes/SeagateBackup/AlphaPulse-coin-shadow/V4`를 컨테이너의 `/v4-logs`에 읽기 전용으로 마운트합니다. 다른 위치를 사용해야 할 때만 배포용 `.env`에 `V4_LOG_HOST_PATH`를 지정하세요. V4Log에서는 폴더 이동과 다운로드만 가능하며 업로드·생성·삭제는 제공하지 않습니다.
+
 ## Jenkins + GitHub 수동 배포
 
 Jenkins 작업 `ifile-manager-deploy`은 자동으로 실행되지 않습니다. GitHub `main`에 원하는 코드를 커밋·푸시한 뒤 Jenkins에서 해당 작업의 **Build Now**를 누르면, 최신 `main`의 `Jenkinsfile`을 읽어 **테스트 → 이미지 빌드 → 컨테이너 교체 → 헬스 체크**를 순서대로 실행합니다. 같은 커밋도 필요하면 다시 수동 배포할 수 있습니다. Jenkins를 외부에 공개하지 않으므로 GitHub 웹훅이나 추가 Funnel 설정은 필요하지 않습니다.

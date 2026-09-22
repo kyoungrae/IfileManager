@@ -127,7 +127,10 @@ button.danger { background: var(--danger); }
 .folder-icon { display: grid; place-items: center; width: 31px; height: 28px; color: #4f88f4; }
 .folder-icon svg { width: 31px; height: 28px; fill: #9fc2ff; stroke: #8aaff1; stroke-width: .7; filter: drop-shadow(0 3px 2px #5c8edb2e); }
 .item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; font-weight: 720; }
-.delete-folder { margin-left: auto; padding: .35rem .48rem; border-radius: 7px; color: var(--danger); background: #fff1f3; font-size: .76rem; box-shadow: none; }
+.folder-actions { display: flex; align-items: center; gap: .35rem; margin-left: auto; }
+.rename-folder, .delete-folder { padding: .35rem .48rem; border-radius: 7px; font-size: .76rem; box-shadow: none; }
+.rename-folder { color: #365c91; background: #edf4ff; }.rename-folder:hover { background: #dceaff; box-shadow: none; transform: none; }
+.delete-folder { color: var(--danger); background: #fff1f3; }
 
 .storage-card { padding: 1.5rem; border: 1px solid #dce5f1; border-radius: 14px; background: #ffffffdc; box-shadow: 0 4px 14px #27497009; }
 .storage-card h2 { font-size: 1.1rem; }
@@ -160,6 +163,11 @@ button.danger { background: var(--danger); }
 .download:hover { background: #daeaff; }
 .delete-file { display: grid; place-items: center; width: 31px; height: 31px; padding: 0; border-radius: 7px; color: var(--danger); background: #fff1f3; box-shadow: none; }
 .delete-file:hover { background: #ffe4e8; box-shadow: none; transform: none; }.delete-file svg { width: 17px; height: 17px; stroke-width: 2; }
+.v4-log-type { display: grid; place-items: center; color: #4f88f4; }.v4-log-type svg { width: 23px; height: 23px; stroke-width: 1.9; }
+.v4-log-folder { min-height: 32px; padding: .25rem .38rem; border-radius: 7px; background: transparent; color: var(--ink); box-shadow: none; text-align: left; }
+.v4-log-folder:hover { background: #edf4ff; color: var(--accent); box-shadow: none; transform: none; }
+.log-open { min-height: 31px; padding: .4rem .58rem; border-radius: 7px; color: var(--accent); background: #edf4ff; font-size: .76rem; box-shadow: none; }.log-open:hover { background: #daeaff; box-shadow: none; transform: none; }
+.read-only-label { margin-left: auto; padding: .25rem .48rem; border-radius: 999px; color: #57708e !important; background: #edf3f9; font-size: .73rem !important; font-weight: 750; }
 
 .empty-panel { display: grid; place-items: center; align-content: center; min-height: 255px; padding: 2rem; border: 1px dashed #c7d9f7; border-radius: 13px; background: #ffffffa3; text-align: center; }
 .empty-panel h3 { margin: .7rem 0 .35rem; font-size: 1.05rem; letter-spacing: -.045em; }.empty-panel p { margin: 0; color: var(--muted); font-size: .9rem; }.empty-panel button { margin-top: 1rem; }
