@@ -10,7 +10,9 @@ const state = {
   fileListTransitionId: 0,
   section: 'files',
   v4Logs: { path: '', entries: [] },
-  query: ''
+  query: '',
+  draggedFolderPath: null,
+  folderMoveInProgress: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -154,6 +156,19 @@ function folderNode(folder, depth = 0, { root = false } = {}) {
 
   const row = document.createElement('article'); row.className = `folder-tree-row${root ? ' root-folder' : ''}`; row.setAttribute('role', 'treeitem');
   row.style.setProperty('--folder-depth', depth);
+  row.dataset.dropFolderPath = folder.path;
+  if (!root) {
+    row.draggable = true;
+    row.setAttribute('aria-label', `${folder.name} 폴더. 드래그하여 다른 폴더로 이동할 수 있습니다.`);
+    row.addEventListener('dragstart', (event) => {
+      state.draggedFolderPath = folder.path;
+      row.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', folder.path);
+    });
+    row.addEventListener('dragend', clearFolderDragState);
+  }
+  attachFolderDropTarget(row, folder.path);
   const toggle = document.createElement('button'); toggle.className = 'folder-toggle'; toggle.type = 'button';
   toggle.setAttribute('aria-label', `${folder.name} ${expanded ? '접기' : '펼치기'}`);
   toggle.setAttribute('aria-expanded', String(expanded));
@@ -356,6 +371,70 @@ function renderV4LogList() {
 
 function folderTreeNode(path) {
   return [...$('#folder-list').querySelectorAll('.folder-tree-node')].find((node) => node.dataset.folderPath === path);
+}
+
+function canMoveFolder(sourcePath, destinationPath) {
+  return Boolean(sourcePath)
+    && sourcePath !== destinationPath
+    && !destinationPath.startsWith(`${sourcePath}/`);
+}
+
+function clearFolderDragState() {
+  state.draggedFolderPath = null;
+  document.querySelectorAll('.folder-tree-row.is-drop-target, .folder-tree-row.is-dragging').forEach((row) => {
+    row.classList.remove('is-drop-target', 'is-dragging');
+  });
+}
+
+function attachFolderDropTarget(row, destinationPath) {
+  row.addEventListener('dragover', (event) => {
+    const sourcePath = state.draggedFolderPath || event.dataTransfer?.getData('text/plain');
+    if (!canMoveFolder(sourcePath, destinationPath)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    row.classList.add('is-drop-target');
+  });
+  row.addEventListener('dragleave', (event) => {
+    if (!row.contains(event.relatedTarget)) row.classList.remove('is-drop-target');
+  });
+  row.addEventListener('drop', async (event) => {
+    const sourcePath = state.draggedFolderPath || event.dataTransfer?.getData('text/plain');
+    event.preventDefault();
+    clearFolderDragState();
+    if (!canMoveFolder(sourcePath, destinationPath)) return;
+    await moveFolder(sourcePath, destinationPath);
+  });
+}
+
+function moveExpandedFolderPaths(sourcePath, movedPath) {
+  state.expandedFolderPaths = new Set([...state.expandedFolderPaths].map((folderPath) => (
+    folderPath === sourcePath || folderPath.startsWith(`${sourcePath}/`)
+      ? `${movedPath}${folderPath.slice(sourcePath.length)}`
+      : folderPath
+  )));
+  expandFolderAncestors(movedPath);
+}
+
+async function moveFolder(sourcePath, destinationPath) {
+  if (state.folderMoveInProgress) return;
+  state.folderMoveInProgress = true;
+  try {
+    const result = await request('/api/folders/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: sourcePath, destinationPath })
+    });
+    const currentWasMoved = state.currentPath === sourcePath || state.currentPath.startsWith(`${sourcePath}/`);
+    const nextPath = currentWasMoved ? `${result.path}${state.currentPath.slice(sourcePath.length)}` : state.currentPath;
+    moveExpandedFolderPaths(sourcePath, result.path);
+    await loadFolder(nextPath);
+    await loadFolderTree();
+    setStatus(destinationPath ? `“${result.name}” 폴더를 선택한 폴더 안으로 이동했습니다.` : `“${result.name}” 폴더를 내 파일 최상위로 이동했습니다.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    state.folderMoveInProgress = false;
+  }
 }
 
 function setFolderExpanded(path, expanded) {

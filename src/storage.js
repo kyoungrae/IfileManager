@@ -5,6 +5,9 @@ import { config } from './config.js';
 export const ROOT_PATH_KEY = 'root';
 export const storageRoot = path.join(config.dataRoot, 'storage');
 export const fileRoot = path.join(config.dataRoot, 'files');
+// This folder is intentionally hidden, but not encrypted. It is an explicit
+// user-requested fallback for opening files directly on another computer.
+export const plainOriginalRoot = path.join(config.dataRoot, '.ifile-manager-originals');
 export const tempRoot = path.join(config.dataRoot, '.ifile-manager-tmp');
 export const trashRoot = path.join(config.dataRoot, '.ifile-manager-trash');
 export const hostStorageStatsPath = config.hostStorageStatsPath;
@@ -12,7 +15,7 @@ export const hostStorageStatsPath = config.hostStorageStatsPath;
 const folderName = /^[\p{L}\p{N}][\p{L}\p{N} ._()\-]{0,119}$/u;
 
 export async function initializeStorage() {
-  await Promise.all([storageRoot, fileRoot, tempRoot, trashRoot].map((directory) => fs.mkdir(directory, { recursive: true, mode: 0o700 })));
+  await Promise.all([storageRoot, fileRoot, plainOriginalRoot, tempRoot, trashRoot].map((directory) => fs.mkdir(directory, { recursive: true, mode: 0o700 })));
 }
 
 function isByteCount(value) {
@@ -74,6 +77,24 @@ export async function existingDirectory(relativePath) {
     current = path.join(current, segment);
     const stat = await fs.lstat(current);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Folder does not exist or is unsafe');
+  }
+  return { normalized, absolutePath: current };
+}
+
+export async function originalDirectory(relativePath, { create = false } = {}) {
+  const normalized = normalizeRelativePath(relativePath);
+  let current = plainOriginalRoot;
+  const rootStat = await fs.lstat(current);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('Plain original storage root is invalid');
+  for (const segment of normalized ? normalized.split('/') : []) {
+    current = path.join(current, segment);
+    try {
+      const stat = await fs.lstat(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Plain original folder is unsafe');
+    } catch (error) {
+      if (error.code !== 'ENOENT' || !create) throw error;
+      await fs.mkdir(current, { mode: 0o700 });
+    }
   }
   return { normalized, absolutePath: current };
 }

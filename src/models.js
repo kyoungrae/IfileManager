@@ -24,6 +24,8 @@ export const ManagedFile = model('ManagedFile', new Schema({
   folderPathKey: { type: String, required: true, index: true },
   storageId: { type: String, required: true, unique: true },
   nameEncrypted: { type: String, required: true },
+  // Optional for records created before plain-original copies were introduced.
+  plainOriginalNameEncrypted: { type: String },
   mimeEncrypted: { type: String, required: true },
   size: { type: Number, required: true, min: 0 },
   uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }

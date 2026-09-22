@@ -107,9 +107,12 @@ button.danger { background: var(--danger); }
 .folder-tree-children-content { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-8px); transition: opacity .18s ease, transform .42s cubic-bezier(.2, .8, .25, 1); }
 .folder-tree-node.is-expanded > .folder-tree-children { grid-template-rows: 1fr; }
 .folder-tree-node.is-expanded > .folder-tree-children > .folder-tree-children-content { opacity: 1; transform: translateY(0); }
-.folder-tree-row { display: flex; align-items: center; min-height: 48px; padding: .2rem .8rem .2rem calc(.8rem + var(--folder-depth) * 1.2rem); border-bottom: 1px solid #e4ebf4; background: #fff; transition: background .16s ease; }
+.folder-tree-row { display: flex; align-items: center; min-height: 48px; padding: .2rem .8rem .2rem calc(.8rem + var(--folder-depth) * 1.2rem); border-bottom: 1px solid #e4ebf4; background: #fff; transition: background .16s ease, box-shadow .16s ease, opacity .16s ease; }
 .folder-tree-row:hover, .folder-tree-row.root-folder { background: #fff; }
 .folder-tree-row.root-folder { min-height: 49px; }
+.folder-tree-row[draggable="true"] { cursor: grab; }
+.folder-tree-row.is-dragging { cursor: grabbing; opacity: .48; }
+.folder-tree-row.is-drop-target { background: #f0f6ff; box-shadow: inset 0 0 0 2px #7ca8ff; }
 .folder-tree-node.is-active > .folder-tree-row { background: #fff; box-shadow: none; }
 .folder-toggle { display: grid; place-items: center; flex: 0 0 auto; width: 25px; height: 32px; padding: 0; border-radius: 7px; background: transparent; color: #173156; box-shadow: none; }
 .folder-toggle:hover:not(:disabled) { background: #e8f1ff; color: var(--accent); box-shadow: none; transform: none; }

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { constants as fsConstants, createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
@@ -18,7 +18,7 @@ import {
 } from './auth.js';
 import {
   ROOT_PATH_KEY, collectDirectoryPaths, existingDirectory, fileRoot, initializeStorage,
-  normalizeRelativePath, relativeChild, storageRoot, storageUsage, tempRoot, trashRoot, validateFolderName
+  normalizeRelativePath, originalDirectory, relativeChild, storageRoot, storageUsage, tempRoot, trashRoot, validateFolderName
 } from './storage.js';
 
 const app = express();
@@ -87,6 +87,153 @@ function selectedFileIds(input) {
     throw new Error('Select at least one valid file');
   }
   return ids;
+}
+
+function filenameVariant(name, suffix) {
+  if (suffix === 1) return name;
+  const extensionAt = name.lastIndexOf('.');
+  const base = extensionAt > 0 ? name.slice(0, extensionAt) : name;
+  const extension = extensionAt > 0 ? name.slice(extensionAt) : '';
+  return `${base} (${suffix})${extension}`;
+}
+
+async function copyPlainOriginal(sourcePath, folderPath, originalName) {
+  const { absolutePath: directory } = await originalDirectory(folderPath, { create: true });
+  for (let suffix = 1; suffix <= 10_000; suffix += 1) {
+    const name = filenameVariant(originalName, suffix);
+    const destination = path.join(directory, name);
+    try {
+      await fs.copyFile(sourcePath, destination, fsConstants.COPYFILE_EXCL);
+      await fs.chmod(destination, 0o600);
+      return { name, absolutePath: destination };
+    } catch (error) {
+      if (error.code === 'EEXIST') continue;
+      await fs.unlink(destination).catch(() => undefined);
+      throw error;
+    }
+  }
+  throw new Error('Too many duplicate file names in the plain original folder');
+}
+
+function plainOriginalName(file) {
+  return file.plainOriginalNameEncrypted ? clientFilename(open(file.plainOriginalNameEncrypted)) : managedFilename(open(file.nameEncrypted));
+}
+
+async function folderPathForFile(file) {
+  if (file.folderPathKey === ROOT_PATH_KEY) return '';
+  const folder = await ManagedFolder.findOne({ pathKey: file.folderPathKey }).lean();
+  if (!folder) throw new Error('The original folder metadata is unavailable');
+  return normalizeRelativePath(open(folder.pathEncrypted));
+}
+
+async function movePlainOriginalFileToTrash(file, folderPath = undefined) {
+  const relativePath = folderPath ?? await folderPathForFile(file);
+  let directory;
+  try { directory = await originalDirectory(relativePath); } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const originalPath = path.join(directory.absolutePath, plainOriginalName(file));
+  let stat;
+  try { stat = await fs.lstat(originalPath); } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Plain original file is unsafe');
+  const trashPath = path.join(trashRoot, `${crypto.randomUUID()}-plain-file`);
+  await fs.rename(originalPath, trashPath);
+  return { originalPath, trashPath };
+}
+
+async function movePlainOriginalFolderToTrash(relativePath) {
+  let source;
+  try { source = await originalDirectory(relativePath); } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const trashPath = path.join(trashRoot, `${crypto.randomUUID()}-plain-folder`);
+  await fs.rename(source.absolutePath, trashPath);
+  return { originalPath: source.absolutePath, trashPath };
+}
+
+async function renamePlainOriginalFolder(oldPath, newPath) {
+  let source;
+  try { source = await originalDirectory(oldPath); } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const parent = await originalDirectory(parentRelativePath(newPath), { create: true });
+  const destination = path.join(parent.absolutePath, path.basename(newPath));
+  try {
+    await fs.lstat(destination);
+    const error = new Error('A plain original folder with that name already exists'); error.code = 'EEXIST'; throw error;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  await fs.rename(source.absolutePath, destination);
+  return { originalPath: source.absolutePath, destination };
+}
+
+async function materializePlainOriginal(file, folderPath) {
+  const { absolutePath: directory } = await originalDirectory(folderPath, { create: true });
+  const configuredName = file.plainOriginalNameEncrypted ? plainOriginalName(file) : null;
+  const originalName = configuredName ?? managedFilename(open(file.nameEncrypted));
+  let name = originalName;
+  let destination = path.join(directory, name);
+
+  if (configuredName) {
+    try {
+      const stat = await fs.lstat(destination);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Plain original file is unsafe');
+      return false;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  } else {
+    for (let suffix = 1; suffix <= 10_000; suffix += 1) {
+      name = filenameVariant(originalName, suffix);
+      destination = path.join(directory, name);
+      try { await fs.lstat(destination); } catch (error) {
+        if (error.code === 'ENOENT') break;
+        throw error;
+      }
+      if (suffix === 10_000) throw new Error('Too many duplicate file names in the plain original folder');
+    }
+  }
+
+  const temporaryPath = path.join(directory, `.${crypto.randomUUID()}.partial`);
+  try {
+    await decryptFile(filePathFor(file.storageId), createWriteStream(temporaryPath, { flags: 'wx', mode: 0o600 }));
+    await fs.rename(temporaryPath, destination);
+    await ManagedFile.updateOne({ _id: file._id }, { $set: { plainOriginalNameEncrypted: seal(name) } });
+    return true;
+  } catch (error) {
+    await fs.unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function synchronizePlainOriginals() {
+  const [folders, files] = await Promise.all([ManagedFolder.find({}).lean(), ManagedFile.find({}).lean()]);
+  const folderPathByKey = new Map([[ROOT_PATH_KEY, '']]);
+  for (const folder of folders) {
+    try { folderPathByKey.set(folder.pathKey, normalizeRelativePath(open(folder.pathEncrypted))); } catch { /* Skip tampered metadata. */ }
+  }
+
+  let copied = 0;
+  for (const file of files) {
+    const folderPath = folderPathByKey.get(file.folderPathKey);
+    if (folderPath === undefined) {
+      console.warn(`Skipping plain original backup for ${file.fileId}: folder metadata is unavailable`);
+      continue;
+    }
+    try {
+      if (await materializePlainOriginal(file, folderPath)) copied += 1;
+    } catch (error) {
+      console.warn(`Could not create plain original backup for ${file.fileId}: ${error.message}`);
+    }
+  }
+  if (copied) console.log(`Created ${copied} plain original backup${copied === 1 ? '' : 's'}`);
 }
 
 function parentRelativePath(relativePath) {
@@ -169,6 +316,61 @@ async function readFolderTree() {
 
 async function audit(actor, action, target, details) {
   await AuditLog.create({ actor, action, targetEncrypted: seal(target), detailsEncrypted: details ? seal(JSON.stringify(details)) : undefined });
+}
+
+async function moveManagedFolder(target, destination, actor) {
+  const movedPath = relativeChild(destination.normalized, path.basename(target.normalized));
+  const movedAbsolutePath = path.join(destination.absolutePath, path.basename(target.normalized));
+  try {
+    await fs.lstat(movedAbsolutePath);
+    const error = new Error('A folder with that name already exists'); error.code = 'EEXIST'; throw error;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  const paths = await collectDirectoryPaths(target.normalized);
+  const pathKeys = paths.map(keyForPath);
+  const pathByKey = new Map(paths.map((folderPath) => [keyForPath(folderPath), folderPath]));
+  const [folders, files] = await Promise.all([
+    ManagedFolder.find({ pathKey: { $in: pathKeys } }).lean(),
+    ManagedFile.find({ folderPathKey: { $in: pathKeys } }).lean()
+  ]);
+  const folderUpdates = folders.flatMap((folder) => {
+    const oldPath = pathByKey.get(folder.pathKey);
+    if (!oldPath) return [];
+    const newPath = replacePathPrefix(oldPath, target.normalized, movedPath);
+    return [{ updateOne: { filter: { _id: folder._id }, update: { $set: {
+      pathKey: keyForPath(newPath),
+      parentPathKey: keyForPath(parentRelativePath(newPath)),
+      pathEncrypted: seal(newPath)
+    } } } }];
+  });
+  const fileUpdates = files.flatMap((file) => {
+    const oldFolderPath = pathByKey.get(file.folderPathKey);
+    if (!oldFolderPath) return [];
+    const newFolderPath = replacePathPrefix(oldFolderPath, target.normalized, movedPath);
+    return [{ updateOne: { filter: { _id: file._id }, update: { $set: { folderPathKey: keyForPath(newFolderPath) } } } }];
+  });
+
+  // Move both filesystem copies first; restore either if the metadata write fails.
+  await fs.rename(target.absolutePath, movedAbsolutePath);
+  let plainOriginalRename;
+  try {
+    plainOriginalRename = await renamePlainOriginalFolder(target.normalized, movedPath);
+    await audit(actor, 'folder.move', target.normalized, {
+      destinationPath: destination.normalized,
+      movedPath,
+      foldersUpdated: folderUpdates.length,
+      filesUpdated: fileUpdates.length
+    });
+    if (folderUpdates.length) await ManagedFolder.bulkWrite(folderUpdates);
+    if (fileUpdates.length) await ManagedFile.bulkWrite(fileUpdates);
+  } catch (error) {
+    if (plainOriginalRename) await fs.rename(plainOriginalRename.destination, plainOriginalRename.originalPath).catch(() => undefined);
+    await fs.rename(movedAbsolutePath, target.absolutePath).catch(() => undefined);
+    throw error;
+  }
+  return { path: movedPath, name: path.basename(movedPath) };
 }
 
 function asyncRoute(handler) {
@@ -263,13 +465,18 @@ app.post('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (reque
   const folderPath = relativeChild(parent.normalized, name);
   const absolutePath = path.join(parent.absolutePath, name);
   await fs.mkdir(absolutePath, { mode: 0o700 });
+  let plainOriginalPath;
   try {
+    const plainOriginalParent = await originalDirectory(parent.normalized, { create: true });
+    plainOriginalPath = path.join(plainOriginalParent.absolutePath, name);
+    await fs.mkdir(plainOriginalPath, { mode: 0o700 });
     await ManagedFolder.create({
       pathKey: keyForPath(folderPath), parentPathKey: keyForPath(parent.normalized),
       nameEncrypted: seal(name), pathEncrypted: seal(folderPath), createdBy: request.user.id
     });
     await audit(request.user.id, 'folder.create', folderPath);
   } catch (error) {
+    if (plainOriginalPath) await fs.rmdir(plainOriginalPath).catch(() => undefined);
     await fs.rmdir(absolutePath).catch(() => undefined);
     throw error;
   }
@@ -319,15 +526,30 @@ app.patch('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (requ
   });
 
   await fs.rename(target.absolutePath, renamedAbsolutePath);
+  let plainOriginalRename;
   try {
+    plainOriginalRename = await renamePlainOriginalFolder(target.normalized, renamedPath);
     await audit(request.user.id, 'folder.rename', target.normalized, { renamedPath, foldersUpdated: folderUpdates.length, filesUpdated: fileUpdates.length });
     if (folderUpdates.length) await ManagedFolder.bulkWrite(folderUpdates);
     if (fileUpdates.length) await ManagedFile.bulkWrite(fileUpdates);
   } catch (error) {
+    if (plainOriginalRename) await fs.rename(plainOriginalRename.destination, plainOriginalRename.originalPath).catch(() => undefined);
     await fs.rename(renamedAbsolutePath, target.absolutePath).catch(() => undefined);
     throw error;
   }
   response.json({ name, path: renamedPath });
+}));
+
+app.post('/api/folders/move', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
+  const target = await existingDirectory(request.body?.path);
+  if (!target.normalized) return response.status(400).json({ error: 'The managed storage root cannot be moved' });
+  const destination = await existingDirectory(request.body?.destinationPath);
+  if (destination.normalized === target.normalized) return response.status(400).json({ error: 'A folder cannot be moved into itself' });
+  if (destination.normalized.startsWith(`${target.normalized}/`)) return response.status(400).json({ error: 'A folder cannot be moved into one of its subfolders' });
+  if (parentRelativePath(target.normalized) === destination.normalized) {
+    return response.json({ name: path.basename(target.normalized), path: target.normalized });
+  }
+  response.json(await moveManagedFolder(target, destination, request.user.id));
 }));
 
 app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
@@ -340,15 +562,21 @@ app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (req
   const pathKeys = paths.map(keyForPath);
   const files = await ManagedFile.find({ folderPathKey: { $in: pathKeys } }).lean();
   const trashPath = path.join(trashRoot, `${crypto.randomUUID()}-deleted-folder`);
+  let plainOriginalTrash;
 
-  // Move first. This makes the folder immediately inaccessible and lets us restore it if metadata deletion fails.
-  await fs.rename(target.absolutePath, trashPath);
+  // Move first. This makes both copies immediately inaccessible and lets us restore them if metadata deletion fails.
+  plainOriginalTrash = await movePlainOriginalFolderToTrash(relativePath);
+  try { await fs.rename(target.absolutePath, trashPath); } catch (error) {
+    if (plainOriginalTrash) await fs.rename(plainOriginalTrash.trashPath, plainOriginalTrash.originalPath).catch(() => undefined);
+    throw error;
+  }
   try {
     // Audit first: a failure leaves both the data and metadata untouched after the rename is restored.
     await audit(request.user.id, 'folder.delete', target.normalized, { filesDeleted: files.length });
     await ManagedFolder.deleteMany({ pathKey: { $in: pathKeys } });
     await ManagedFile.deleteMany({ folderPathKey: { $in: pathKeys } });
   } catch (error) {
+    if (plainOriginalTrash) await fs.rename(plainOriginalTrash.trashPath, plainOriginalTrash.originalPath).catch(() => undefined);
     await fs.rename(trashPath, target.absolutePath).catch(() => undefined);
     throw error;
   }
@@ -356,6 +584,7 @@ app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (req
     if (error.code !== 'ENOENT') throw error;
   })));
   await fs.rm(trashPath, { recursive: true, force: true });
+  if (plainOriginalTrash) await fs.rm(plainOriginalTrash.trashPath, { recursive: true, force: true });
   response.status(204).end();
 }));
 
@@ -364,6 +593,7 @@ app.post('/api/files', requireAppRequest, requireAuth, upload.array('files', con
   if (!uploadedFiles.length) return response.status(400).json({ error: 'At least one file is required' });
   const folder = await existingDirectory(request.body?.folderPath);
   const encryptedPaths = [];
+  const plainOriginalPaths = [];
   const records = [];
   const totalBytes = uploadedFiles.reduce((total, file) => total + file.size, 0);
   try {
@@ -373,9 +603,11 @@ app.post('/api/files', requireAppRequest, requireAuth, upload.array('files', con
       const encryptedPath = filePathFor(storageId);
       await encryptFile(file.path, encryptedPath);
       encryptedPaths.push(encryptedPath);
+      const plainOriginal = await copyPlainOriginal(file.path, folder.normalized, originalName);
+      plainOriginalPaths.push(plainOriginal.absolutePath);
       const record = await ManagedFile.create({
         fileId: crypto.randomUUID(), storageId, folderPathKey: keyForPath(folder.normalized),
-        nameEncrypted: seal(originalName), mimeEncrypted: seal(file.mimetype || 'application/octet-stream'),
+        nameEncrypted: seal(originalName), plainOriginalNameEncrypted: seal(plainOriginal.name), mimeEncrypted: seal(file.mimetype || 'application/octet-stream'),
         size: file.size, uploadedBy: request.user.id
       });
       records.push({ id: record.fileId, name: originalName, size: file.size });
@@ -384,6 +616,7 @@ app.post('/api/files', requireAppRequest, requireAuth, upload.array('files', con
     response.status(201).json({ files: records });
   } catch (error) {
     await Promise.all(encryptedPaths.map((encryptedPath) => fs.unlink(encryptedPath).catch(() => undefined)));
+    await Promise.all(plainOriginalPaths.map((plainOriginalPath) => fs.unlink(plainOriginalPath).catch(() => undefined)));
     if (records.length) await ManagedFile.deleteMany({ fileId: { $in: records.map((record) => record.id) } });
     throw error;
   } finally {
@@ -399,15 +632,19 @@ app.delete('/api/files/:fileId', requireAppRequest, requireAuth, asyncRoute(asyn
   const encryptedPath = filePathFor(file.storageId);
   const trashPath = path.join(trashRoot, `${crypto.randomUUID()}-deleted-file`);
   await fs.rename(encryptedPath, trashPath);
+  let plainOriginalTrash;
   try {
+    plainOriginalTrash = await movePlainOriginalFileToTrash(file);
     await audit(request.user.id, 'file.delete', open(file.nameEncrypted), { fileId: file.fileId, bytes: file.size });
     const deletion = await ManagedFile.deleteOne({ _id: file._id });
     if (deletion.deletedCount !== 1) throw new Error('File metadata could not be deleted');
   } catch (error) {
+    if (plainOriginalTrash) await fs.rename(plainOriginalTrash.trashPath, plainOriginalTrash.originalPath).catch(() => undefined);
     await fs.rename(trashPath, encryptedPath).catch(() => undefined);
     throw error;
   }
   await fs.unlink(trashPath);
+  if (plainOriginalTrash) await fs.unlink(plainOriginalTrash.trashPath);
   response.status(204).end();
 }));
 
@@ -473,6 +710,7 @@ async function start() {
   await initializeStorage();
   await mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 10_000 });
   await bootstrapAdmin();
+  await synchronizePlainOriginals();
   app.listen(config.port, () => console.log(`IFile Manager listening on port ${config.port}`));
 }
 
