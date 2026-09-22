@@ -68,6 +68,8 @@ curl http://127.0.0.1:4300/health
 
 서비스는 기본적으로 `127.0.0.1:4300`에만 열립니다. 집의 Caddy/Nginx/Traefik에서 HTTPS 도메인으로 역방향 프록시하고 `COOKIE_SECURE=true`를 유지하세요. 공인 인터넷에 4300 포트를 직접 공개하지 마세요.
 
+Tailscale IP로 HTTP 포트를 직접 열어야 한다면 `.env`에서 `PUBLIC_BIND_IP=100.x.y.z`와 `COOKIE_SECURE=false`를 함께 설정합니다. 이 경우 Docker는 해당 Tailscale 인터페이스에만 바인딩되지만, 브라우저 HTTPS는 제공되지 않습니다. HTTPS가 필요한 운영 환경에서는 Tailscale Serve 또는 역방향 프록시 구성을 권장합니다.
+
 ## Jenkins + GitHub
 
 1. Jenkins에 **Pipeline from SCM** 작업을 만듭니다.

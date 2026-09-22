@@ -17,8 +17,8 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
     ports:
-      # Keep the app local; put it behind the home's HTTPS reverse proxy.
-      - "127.0.0.1:${APP_PORT:-4300}:3000"
+      # Bind only to the Tailscale interface when PUBLIC_BIND_IP is set.
+      - "${PUBLIC_BIND_IP:-127.0.0.1}:${APP_PORT:-4300}:3000"
     volumes:
       - "${REMOVABLE_DISK_PATH:?Set REMOVABLE_DISK_PATH in .env}/ifile-manager:/data"
     # Allows host.docker.internal to work on Linux too. On Docker Desktop it is built in.
