@@ -13,6 +13,7 @@ const iconPaths = {
   users: '<path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-5A4.5 4.5 0 0 0 2 18.5V20"/><circle cx="9" cy="7" r="3"/><path d="M16 4.2a3 3 0 0 1 0 5.6M22 20v-1.5a4.5 4.5 0 0 0-3-4.25"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.3 2"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6.5 7l.8 13h9.4l.8-13M10 11v5M14 11v5"/>',
+  star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.3 4.3"/>',
   'arrow-up': '<path d="M12 20V4M6.5 9.5 12 4l5.5 5.5"/>',
   'folder-plus': '<path d="M3 6.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v5M9.5 12.5h5"/>',
@@ -183,7 +184,8 @@ function renderStorage(storage) {
   $('#storage-total').textContent = `/ ${formatStorageSize(total)}`;
   $('#storage-used').textContent = formatStorageSize(used);
   $('#storage-free-detail').textContent = formatStorageSize(free);
-  $('#mini-storage-progress').style.width = `${freePercent}%`;
+  $('#mini-storage-ring').style.setProperty('--storage-progress', freePercent);
+  $('#mini-storage-percent').textContent = `${freePercent}%`;
   $('#mini-storage-value').textContent = `${formatStorageSize(free)} / ${formatStorageSize(total)}  ${freePercent}%`;
 }
 

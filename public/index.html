@@ -24,15 +24,16 @@
 
       <section id="app-panel" class="app-layout" hidden>
         <aside class="sidebar" aria-label="파일 탐색">
-          <div class="brand"><h1>파일 관리자</h1><p>암호화된 이동식 디스크</p></div>
+          <div class="brand" aria-label="파일 관리자"><span class="brand-mark" data-icon="folder" aria-hidden="true"></span><span class="visually-hidden">파일 관리자</span></div>
           <nav class="side-nav" aria-label="주요 메뉴">
-            <button class="side-nav-item active" type="button" aria-current="page" data-nav="files"><span class="nav-icon" data-icon="folder"></span>내 파일</button>
-            <button class="side-nav-item" type="button" data-nav="shared"><span class="nav-icon" data-icon="users"></span>공유됨</button>
-            <button class="side-nav-item" type="button" data-nav="recent"><span class="nav-icon" data-icon="clock"></span>최근 항목</button>
-            <button class="side-nav-item" type="button" data-nav="trash"><span class="nav-icon" data-icon="trash"></span>휴지통</button>
+            <button class="side-nav-item active" type="button" aria-current="page" aria-label="내 파일" data-tooltip="내 파일" data-nav="files"><span class="nav-icon" data-icon="folder"></span></button>
+            <button class="side-nav-item" type="button" aria-label="공유됨" data-tooltip="공유됨" data-nav="shared"><span class="nav-icon" data-icon="users"></span></button>
+            <button class="side-nav-item" type="button" aria-label="최근 항목" data-tooltip="최근 항목" data-nav="recent"><span class="nav-icon" data-icon="clock"></span></button>
+            <button class="side-nav-item" type="button" aria-label="즐겨찾기" data-tooltip="즐겨찾기" data-nav="favorites"><span class="nav-icon" data-icon="star"></span></button>
           </nav>
           <section class="storage-mini" aria-label="저장소 요약">
-            <h2>저장소</h2><div class="progress"><span id="mini-storage-progress"></span></div><p>남은 저장 공간</p><strong id="mini-storage-value">확인 중…</strong>
+            <div class="mini-storage-ring" id="mini-storage-ring"><strong id="mini-storage-percent">–</strong></div>
+            <strong class="visually-hidden" id="mini-storage-value">확인 중…</strong>
           </section>
         </aside>
 
