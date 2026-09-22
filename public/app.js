@@ -233,8 +233,9 @@ function syncFileSelectionControls() {
   }
   const button = $('#bulk-download-button');
   const count = state.selectedFileIds.size;
-  button.hidden = count === 0;
+  button.classList.toggle('is-hidden', count === 0);
   button.disabled = count === 0;
+  button.setAttribute('aria-hidden', String(count === 0));
   $('#bulk-download-label').textContent = `선택 파일 ${count}개 ZIP 다운로드`;
 }
 
