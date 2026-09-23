@@ -43,7 +43,8 @@ const iconPaths = {
   'file-code': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 13l-2 2 2 2M14 13l2 2-2 2"/>',
   'file-text': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 16h8M8 19h5"/>',
   'file-up': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9.5 14.5 12 12l2.5 2.5"/>',
-  'chevron-right': '<path d="m9 18 6-6-6-6"/>'
+  'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+  eye: '<path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.7"/>'
 };
 
 function applyIcons(root = document) {
@@ -75,6 +76,31 @@ function setStatus(message = '', isError = false) {
   const element = $('#status');
   element.textContent = message;
   element.classList.toggle('error', isError);
+}
+
+let loadingDismissTimer;
+
+function showOperationLoading(title, description) {
+  window.clearTimeout(loadingDismissTimer);
+  $('#operation-loading-title').textContent = title;
+  $('#operation-loading-description').textContent = description;
+  $('#operation-loading').hidden = false;
+}
+
+function hideOperationLoading() {
+  window.clearTimeout(loadingDismissTimer);
+  $('#operation-loading').hidden = true;
+}
+
+function showDownloadLoading(description = '다운로드를 시작하고 있습니다.') {
+  showOperationLoading('다운로드 준비 중…', description);
+  // A browser intentionally does not expose an attachment download's completion
+  // to JavaScript. Keep the overlay through the server's initial response only.
+  loadingDismissTimer = window.setTimeout(hideOperationLoading, 2_000);
+}
+
+function attachDownloadLoading(link, description) {
+  link.addEventListener('click', () => showDownloadLoading(description));
 }
 
 function formatSize(bytes) {
@@ -115,6 +141,61 @@ function fileIconFor(name) {
   if (['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'css', 'html', 'sql', 'sh'].includes(extension)) return { icon: 'file-code', kind: 'code' };
   if (['txt', 'md', 'log', 'json', 'xml', 'yaml', 'yml', 'ini', 'conf'].includes(extension)) return { icon: 'file-text', kind: 'text' };
   return { icon: 'file', kind: 'generic' };
+}
+
+function previewKindFor(name) {
+  const filename = String(name).trim().toLocaleLowerCase('en-US');
+  const extensionAt = filename.lastIndexOf('.');
+  const extension = extensionAt > 0 && extensionAt < filename.length - 1 ? filename.slice(extensionAt + 1) : '';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(extension)) return 'image';
+  if (extension === 'pdf') return 'pdf';
+  if (['mp4', 'm4v', 'mov', 'webm'].includes(extension)) return 'video';
+  if (['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'].includes(extension)) return 'audio';
+  if (['txt', 'md', 'log', 'json', 'xml', 'yaml', 'yml', 'csv', 'tsv', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'hpp', 'css', 'html', 'htm', 'sql', 'sh'].includes(extension)) return 'text';
+  return 'unsupported';
+}
+
+function openFilePreview({ name, size, previewUrl, downloadUrl }) {
+  const dialog = $('#preview-dialog');
+  const content = $('#preview-content');
+  const kind = previewKindFor(name);
+  $('#preview-title').textContent = name;
+  $('#preview-size').textContent = formatSize(size);
+  const download = $('#preview-download');
+  download.href = downloadUrl;
+  download.download = name;
+  content.replaceChildren();
+
+  if (kind === 'image') {
+    const image = document.createElement('img'); image.src = previewUrl; image.alt = name; image.className = 'preview-image';
+    content.append(image);
+  } else if (kind === 'pdf') {
+    const frame = document.createElement('iframe'); frame.className = 'preview-frame'; frame.src = previewUrl; frame.title = `${name} 미리보기`; frame.setAttribute('sandbox', '');
+    content.append(frame);
+  } else if (kind === 'video' || kind === 'audio') {
+    const media = document.createElement(kind); media.className = `preview-${kind}`; media.src = previewUrl; media.controls = true; media.preload = 'metadata';
+    content.append(media);
+  } else if (kind === 'text') {
+    if (size > 2 * 1024 * 1024) {
+      const message = document.createElement('p'); message.className = 'preview-message'; message.textContent = `${formatSize(size)} 텍스트 파일은 미리보기 제한(2 MB)을 초과했습니다. 다운로드하여 확인하세요.`;
+      content.append(message);
+    } else {
+      const message = document.createElement('p'); message.className = 'preview-message'; message.textContent = '파일을 불러오는 중…'; content.append(message);
+      void fetch(previewUrl, { credentials: 'same-origin' }).then(async (response) => {
+        if (!response.ok) throw new Error('미리보기를 불러오지 못했습니다.');
+        const text = document.createElement('pre'); text.className = 'preview-text'; text.textContent = await response.text();
+        if (dialog.open && $('#preview-title').textContent === name) content.replaceChildren(text);
+      }).catch((error) => {
+        if (dialog.open && $('#preview-title').textContent === name) {
+          const failure = document.createElement('p'); failure.className = 'preview-message'; failure.textContent = error.message; content.replaceChildren(failure);
+        }
+      });
+    }
+  } else {
+    const message = document.createElement('p'); message.className = 'preview-message'; message.textContent = '이 파일 형식은 브라우저 미리보기를 지원하지 않습니다. 다운로드하여 확인하세요.';
+    content.append(message);
+  }
+  dialog.showModal();
 }
 
 function renderBreadcrumbs() {
@@ -210,11 +291,12 @@ function fileRow(file) {
     syncFileSelectionControls();
   });
   const icon = fileIconFor(file.name);
-  const name = document.createElement('span'); name.className = 'file-name'; name.title = file.name; name.append(svgIcon(icon.icon, `file-icon file-icon-${icon.kind}`), document.createTextNode(file.name));
+  const name = document.createElement('button'); name.type = 'button'; name.className = 'file-name file-preview-trigger'; name.title = `${file.name} 미리보기`; name.setAttribute('aria-label', `${file.name} 미리보기`); name.append(svgIcon(icon.icon, `file-icon file-icon-${icon.kind}`), document.createTextNode(file.name));
+  name.addEventListener('click', () => openFilePreview({ name: file.name, size: file.size, previewUrl: `/api/files/${encodeURIComponent(file.id)}/preview`, downloadUrl: `/api/files/${encodeURIComponent(file.id)}/download` }));
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.createdAt));
   const size = document.createElement('span'); size.className = 'file-size'; size.textContent = formatSize(file.size);
   const actions = document.createElement('div'); actions.className = 'file-actions';
-  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.textContent = '다운로드';
+  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.textContent = '다운로드'; attachDownloadLoading(download, `“${file.name}” 다운로드를 시작하고 있습니다.`);
   const remove = document.createElement('button'); remove.className = 'delete-file'; remove.type = 'button'; remove.setAttribute('aria-label', `${file.name} 삭제`); remove.title = '삭제'; remove.append(svgIcon('trash'));
   remove.addEventListener('click', () => openFileDeleteDialog(file));
   actions.append(download, remove);
@@ -448,13 +530,14 @@ function v4LogRow(entry) {
   const row = document.createElement('article'); row.className = 'file-row v4-log-row'; row.setAttribute('role', 'row');
   const icon = entry.type === 'directory' ? null : fileIconFor(entry.name);
   const type = svgIcon(entry.type === 'directory' ? 'folder' : icon.icon, `v4-log-type${icon ? ` file-icon-${icon.kind}` : ''}`);
-  const name = document.createElement(entry.type === 'directory' ? 'button' : 'span'); name.className = `file-name${entry.type === 'directory' ? ' v4-log-folder' : ''}`; name.append(document.createTextNode(entry.name));
-  if (entry.type === 'directory') { name.type = 'button'; name.addEventListener('click', () => loadV4Logs(entry.path)); }
+  const name = document.createElement('button'); name.type = 'button'; name.className = `file-name${entry.type === 'directory' ? ' v4-log-folder' : ' file-preview-trigger'}`; name.append(document.createTextNode(entry.name));
+  if (entry.type === 'directory') name.addEventListener('click', () => loadV4Logs(entry.path));
+  else name.addEventListener('click', () => openFilePreview({ name: entry.name, size: entry.size, previewUrl: `/api/v4-logs/preview?${new URLSearchParams({ path: entry.path })}`, downloadUrl: `/api/v4-logs/download?${new URLSearchParams({ path: entry.path })}` }));
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.modifiedAt));
   const size = document.createElement('span'); size.className = 'file-size'; size.textContent = entry.type === 'directory' ? '폴더' : formatSize(entry.size);
   const actions = document.createElement('div'); actions.className = 'file-actions';
   if (entry.type !== 'directory') {
-    const download = document.createElement('a'); download.className = 'download'; download.href = `/api/v4-logs/download?${new URLSearchParams({ path: entry.path })}`; download.download = entry.name; download.textContent = '다운로드'; actions.append(download);
+    const download = document.createElement('a'); download.className = 'download'; download.href = `/api/v4-logs/download?${new URLSearchParams({ path: entry.path })}`; download.download = entry.name; download.textContent = '다운로드'; attachDownloadLoading(download, `“${entry.name}” 다운로드를 시작하고 있습니다.`); actions.append(download);
   }
   row.append(type, name, metadata, size, actions); return row;
 }
@@ -754,6 +837,7 @@ async function uploadSelectedFiles(files) {
   const selectedFiles = [...(files ?? [])];
   if (!selectedFiles.length) return;
   const data = new FormData(); data.append('folderPath', state.currentPath); selectedFiles.forEach((file) => data.append('files', file));
+  showOperationLoading('파일 업로드 중…', selectedFiles.length === 1 ? `“${selectedFiles[0].name}” 파일을 암호화하고 저장하고 있습니다.` : `${selectedFiles.length}개 파일을 암호화하고 저장하고 있습니다.`);
   setStatus(selectedFiles.length === 1 ? `“${selectedFiles[0].name}” 암호화 후 업로드 중…` : `${selectedFiles.length}개 파일을 암호화 후 업로드 중…`);
   try {
     const result = await request('/api/files', { method: 'POST', body: data });
@@ -761,6 +845,7 @@ async function uploadSelectedFiles(files) {
     setStatus(result.files.length === 1 ? '파일을 암호화하여 업로드했습니다.' : `${result.files.length}개 파일을 암호화하여 업로드했습니다.`);
   }
   catch (error) { setStatus(error.message, true); }
+  finally { hideOperationLoading(); }
 }
 
 async function refreshStorageAfterMutation() {
@@ -772,6 +857,7 @@ async function refreshStorageAfterMutation() {
 function downloadSelectedFilesAsZip() {
   const ids = [...state.selectedFileIds];
   if (!ids.length) return;
+  showDownloadLoading(`${ids.length}개 파일을 ZIP으로 준비하고 있습니다.`);
   const form = document.createElement('form');
   form.method = 'POST'; form.action = '/api/files/archive'; form.target = 'zip-download-target'; form.hidden = true;
   ids.forEach((id) => {
@@ -793,6 +879,7 @@ function attachUploadDropzone(panel) {
 
 applyIcons();
 attachUploadDropzone($('#upload-drop-zone'));
+attachDownloadLoading($('#preview-download'), '파일 다운로드를 시작하고 있습니다.');
 
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault(); $('#login-error').textContent = '';

@@ -80,6 +80,31 @@ function forceDownload(response, name, size) {
   response.set(headers);
 }
 
+function previewMimeType(name) {
+  const extension = path.extname(name).slice(1).toLocaleLowerCase('en-US');
+  const mimeTypes = {
+    pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif',
+    mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+    mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', flac: 'audio/flac'
+  };
+  if (mimeTypes[extension]) return mimeTypes[extension];
+  if (['txt', 'md', 'log', 'json', 'xml', 'yaml', 'yml', 'csv', 'tsv', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'hpp', 'css', 'html', 'htm', 'sql', 'sh'].includes(extension)) return 'text/plain; charset=utf-8';
+  return 'application/octet-stream';
+}
+
+function forcePreview(response, name, size) {
+  const safeName = clientFilename(name);
+  const headers = {
+    'Content-Type': previewMimeType(safeName),
+    'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+    'Cache-Control': 'no-store, private',
+    'X-Content-Type-Options': 'nosniff',
+    'Cross-Origin-Resource-Policy': 'same-origin'
+  };
+  if (Number.isSafeInteger(size) && size >= 0) headers['Content-Length'] = String(size);
+  response.set(headers);
+}
+
 function selectedFileIds(input) {
   const values = Array.isArray(input) ? input : [input];
   const ids = [...new Set(values)];
@@ -359,20 +384,42 @@ function readTrashedFolderSnapshot(folder) {
   return snapshot;
 }
 
+function decryptFolderDisplayName(value, fallback) {
+  try { return managedFilename(open(value)); } catch { return fallback; }
+}
+
+function decryptFolderPath(value, fallback = '') {
+  try { return normalizeRelativePath(open(value)); } catch { return fallback; }
+}
+
+function normalizeTrashedFolderPath(value) {
+  try { return normalizeRelativePath(value); } catch { return null; }
+}
+
 function folderTreeFromSnapshot(snapshot) {
-  const nodes = new Map(snapshot.folders.map((folder) => [folder.path, {
-    type: 'folder', name: open(folder.nameEncrypted), path: folder.path, children: []
-  }]));
+  const nodes = new Map();
+  for (const folder of snapshot.folders) {
+    const folderPath = normalizeTrashedFolderPath(folder.path);
+    if (!folderPath || nodes.has(folderPath)) continue;
+    nodes.set(folderPath, {
+      type: 'folder', name: decryptFolderDisplayName(folder.nameEncrypted, path.basename(folderPath)), path: folderPath, children: []
+    });
+  }
   const root = nodes.get(snapshot.rootPath);
-  if (!root) throw new Error('Trash folder root metadata is unavailable');
+  if (!root) return [];
   for (const folder of snapshot.folders) {
     if (folder.path === snapshot.rootPath) continue;
-    const parent = nodes.get(parentRelativePath(folder.path));
-    if (parent) parent.children.push(nodes.get(folder.path));
+    const folderPath = normalizeTrashedFolderPath(folder.path);
+    if (!folderPath) continue;
+    const parent = nodes.get(parentRelativePath(folderPath));
+    const child = nodes.get(folderPath);
+    if (parent && child) parent.children.push(child);
   }
   for (const file of snapshot.files) {
-    const parent = nodes.get(file.folderPath);
-    if (parent) parent.children.push({ type: 'file', name: managedFilename(open(file.nameEncrypted)), size: file.size });
+    const parent = nodes.get(normalizeTrashedFolderPath(file.folderPath));
+    if (parent) parent.children.push({
+      type: 'file', name: decryptFolderDisplayName(file.nameEncrypted, '이름을 확인할 수 없는 파일'), size: Number.isSafeInteger(file.size) ? file.size : 0
+    });
   }
   const sortEntries = (entries) => entries.sort((left, right) => (
     left.type === right.type ? left.name.localeCompare(right.name, 'ko') : left.type === 'folder' ? -1 : 1
@@ -382,15 +429,18 @@ function folderTreeFromSnapshot(snapshot) {
 }
 
 function apiTrashedFolder(folder) {
-  const snapshot = readTrashedFolderSnapshot(folder);
+  let snapshot;
+  try { snapshot = readTrashedFolderSnapshot(folder); } catch { snapshot = null; }
+  const fallbackName = snapshot?.rootPath ? path.basename(snapshot.rootPath) : '복구 대기 폴더';
   return {
     id: folder.trashId,
     type: 'folder',
-    name: open(folder.nameEncrypted),
-    originalPath: normalizeRelativePath(open(folder.originalParentPathEncrypted)),
+    name: decryptFolderDisplayName(folder.nameEncrypted, fallbackName),
+    originalPath: decryptFolderPath(folder.originalParentPathEncrypted),
     size: folder.size,
     trashedAt: folder.createdAt,
-    children: folderTreeFromSnapshot(snapshot)
+    children: snapshot ? folderTreeFromSnapshot(snapshot) : [],
+    recoveryWarning: !snapshot
   };
 }
 
@@ -756,6 +806,15 @@ app.get('/api/v4-logs/download', requireAuth, asyncRoute(async (request, respons
   createReadStream(target.absolutePath).on('error', next).pipe(response);
 }));
 
+app.get('/api/v4-logs/preview', requireAuth, asyncRoute(async (request, response, next) => {
+  const target = await existingV4LogEntry(request.query.path);
+  if (!target.stat.isFile()) return response.status(400).json({ error: 'V4 log path is not a file' });
+  const name = clientFilename(path.basename(target.absolutePath));
+  forcePreview(response, name, target.stat.size);
+  await audit(request.user.id, 'v4-log.preview', target.normalized, { bytes: target.stat.size });
+  createReadStream(target.absolutePath).on('error', next).pipe(response);
+}));
+
 app.get('/api/folders/tree', requireAuth, asyncRoute(async (_request, response) => {
   response.json({ folders: await readFolderTree() });
 }));
@@ -910,12 +969,19 @@ app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (req
   if (!targetFolder) throw new Error('Folder metadata is unavailable');
   const originalParentPath = parentRelativePath(target.normalized);
   const originalParentFolder = originalParentPath ? await ManagedFolder.findOne({ pathKey: keyForPath(originalParentPath) }).lean() : null;
+  const foldersByPathKey = new Map(folders.map((folder) => [folder.pathKey, folder]));
+  const snapshotFolders = paths.map((folderPath) => {
+    const folder = foldersByPathKey.get(keyForPath(folderPath));
+    return {
+      _id: folder?._id ?? new mongoose.Types.ObjectId(),
+      path: folderPath,
+      nameEncrypted: folder?.nameEncrypted ?? seal(path.basename(folderPath)),
+      createdBy: folder?.createdBy ?? request.user.id
+    };
+  });
   const snapshot = {
     rootPath: target.normalized,
-    folders: folders.flatMap((folder) => {
-      const folderPath = pathByKey.get(folder.pathKey);
-      return folderPath ? [{ _id: folder._id, path: folderPath, nameEncrypted: folder.nameEncrypted, createdBy: folder.createdBy }] : [];
-    }),
+    folders: snapshotFolders,
     files: files.flatMap((file) => {
       const folderPath = pathByKey.get(file.folderPathKey);
       return folderPath ? [{
@@ -1118,6 +1184,15 @@ app.get('/api/files/:fileId/download', requireAuth, asyncRoute(async (request, r
   const name = managedFilename(open(file.nameEncrypted));
   forceDownload(response, name, file.size);
   await audit(request.user.id, 'file.download', name, { fileId: file.fileId });
+  await decryptFile(filePathFor(file.storageId), response);
+}));
+
+app.get('/api/files/:fileId/preview', requireAuth, asyncRoute(async (request, response) => {
+  const file = await ManagedFile.findOne({ fileId: request.params.fileId }).lean();
+  if (!file) return response.status(404).json({ error: 'File not found' });
+  const name = managedFilename(open(file.nameEncrypted));
+  forcePreview(response, name, file.size);
+  await audit(request.user.id, 'file.preview', name, { fileId: file.fileId, bytes: file.size });
   await decryptFile(filePathFor(file.storageId), response);
 }));
 
