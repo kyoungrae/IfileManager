@@ -7,6 +7,7 @@ const state = {
   folderTree: [],
   expandedFolderPaths: new Set(['']),
   selectedFileIds: new Set(),
+  fileView: 'list',
   fileListTransitionId: 0,
   section: 'files',
   v4Logs: { path: '', entries: [] },
@@ -228,6 +229,19 @@ function fileIconFor(name) {
   return { icon: 'file', kind: 'generic' };
 }
 
+function fileExtensionLabel(name) {
+  const fileName = String(name).trim();
+  const extensionAt = fileName.lastIndexOf('.');
+  const extension = extensionAt > 0 && extensionAt < fileName.length - 1 ? fileName.slice(extensionAt + 1) : '';
+  return (extension || 'FILE').toLocaleUpperCase('en-US').slice(0, 8);
+}
+
+function showFileCardPlaceholder(container, icon, name) {
+  const extension = document.createElement('span'); extension.className = 'file-extension-label'; extension.textContent = fileExtensionLabel(name);
+  container.replaceChildren(svgIcon(icon.icon, `file-icon file-icon-${icon.kind}`), extension);
+  container.classList.add('thumbnail-unavailable');
+}
+
 function previewKindFor(name) {
   const filename = String(name).trim().toLocaleLowerCase('en-US');
   const extensionAt = filename.lastIndexOf('.');
@@ -388,23 +402,90 @@ function fileRow(file) {
   row.append(checkbox, name, metadata, size, actions); return row;
 }
 
+function selectAllFiles(checked) {
+  const visibleFiles = state.directory.files.filter((file) => nameMatches(file.name));
+  visibleFiles.forEach((file) => state.selectedFileIds[checked ? 'add' : 'delete'](file.id));
+  document.querySelectorAll('#file-list .file-checkbox[data-file-id]').forEach((item) => {
+    item.checked = checked;
+    item.closest('.file-row, .file-card')?.classList.toggle('is-selected', checked);
+  });
+  syncFileSelectionControls();
+}
+
+function selectAllFilesCheckbox(label) {
+  const checkbox = document.createElement('input'); checkbox.id = 'select-all-files'; checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.setAttribute('aria-label', label);
+  checkbox.addEventListener('change', () => selectAllFiles(checkbox.checked));
+  return checkbox;
+}
+
 function fileTableHeader() {
   const row = document.createElement('article'); row.className = 'file-row file-header'; row.setAttribute('role', 'row');
-  const checkbox = document.createElement('input'); checkbox.id = 'select-all-files'; checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox'; checkbox.setAttribute('aria-label', '표시된 파일 전체 선택');
-  checkbox.addEventListener('change', () => {
-    const visibleFiles = state.directory.files.filter((file) => nameMatches(file.name));
-    visibleFiles.forEach((file) => state.selectedFileIds[checkbox.checked ? 'add' : 'delete'](file.id));
-    document.querySelectorAll('#file-list .file-checkbox[data-file-id]').forEach((item) => {
-      item.checked = checkbox.checked;
-      item.closest('.file-row')?.classList.toggle('is-selected', checkbox.checked);
-    });
-    syncFileSelectionControls();
-  });
+  const checkbox = selectAllFilesCheckbox('표시된 파일 전체 선택');
   const name = document.createElement('span'); name.textContent = '이름';
   const modified = document.createElement('span'); modified.textContent = '수정한 날짜';
   const size = document.createElement('span'); size.textContent = '크기';
   const actions = document.createElement('span'); actions.textContent = '작업';
   row.append(checkbox, name, modified, size, actions); return row;
+}
+
+function fileCard(file) {
+  const card = document.createElement('article'); card.className = 'file-card'; card.setAttribute('role', 'listitem');
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'file-checkbox file-card-checkbox'; checkbox.dataset.fileId = file.id; checkbox.checked = state.selectedFileIds.has(file.id); checkbox.setAttribute('aria-label', `${file.name} 선택`);
+  card.classList.toggle('is-selected', checkbox.checked);
+  checkbox.addEventListener('change', () => {
+    state.selectedFileIds[checkbox.checked ? 'add' : 'delete'](file.id);
+    card.classList.toggle('is-selected', checkbox.checked);
+    syncFileSelectionControls();
+  });
+
+  const icon = fileIconFor(file.name);
+  const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'file-card-thumbnail'; preview.title = `${file.name} 미리보기`; preview.setAttribute('aria-label', `${file.name} 미리보기`);
+  if (previewKindFor(file.name) === 'image') {
+    const image = document.createElement('img'); image.src = `/api/files/${encodeURIComponent(file.id)}/preview`; image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
+    image.addEventListener('error', () => {
+      showFileCardPlaceholder(preview, icon, file.name);
+    }, { once: true });
+    preview.append(image);
+  } else {
+    showFileCardPlaceholder(preview, icon, file.name);
+  }
+  preview.addEventListener('click', () => openFilePreview({ name: file.name, size: file.size, previewUrl: `/api/files/${encodeURIComponent(file.id)}/preview`, downloadUrl: `/api/files/${encodeURIComponent(file.id)}/download` }));
+
+  const details = document.createElement('div'); details.className = 'file-card-details';
+  const name = document.createElement('button'); name.type = 'button'; name.className = 'file-card-name'; name.textContent = file.name; name.title = file.name; name.addEventListener('click', () => openFilePreview({ name: file.name, size: file.size, previewUrl: `/api/files/${encodeURIComponent(file.id)}/preview`, downloadUrl: `/api/files/${encodeURIComponent(file.id)}/download` }));
+  const metadata = document.createElement('span'); metadata.textContent = `${formatSize(file.size)} · ${new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium' }).format(new Date(file.createdAt))}`;
+  details.append(name, metadata);
+
+  const actions = document.createElement('div'); actions.className = 'file-card-actions';
+  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.textContent = '다운로드'; attachDownloadLoading(download, `“${file.name}” 다운로드를 시작하고 있습니다.`);
+  const remove = document.createElement('button'); remove.className = 'delete-file'; remove.type = 'button'; remove.setAttribute('aria-label', `${file.name} 삭제`); remove.title = '삭제'; remove.append(svgIcon('trash')); remove.addEventListener('click', () => openFileDeleteDialog(file));
+  actions.append(download, remove);
+  card.append(checkbox, preview, details, actions);
+  return card;
+}
+
+function fileGridHeader(files) {
+  const header = document.createElement('div'); header.className = 'file-grid-header';
+  const checkbox = selectAllFilesCheckbox('표시된 파일 전체 선택');
+  const label = document.createElement('label'); label.htmlFor = checkbox.id; label.textContent = '전체 선택';
+  const count = document.createElement('span'); count.textContent = `${files.length}개 파일`;
+  header.append(checkbox, label, count);
+  return header;
+}
+
+function syncFileViewControls() {
+  const grid = state.fileView === 'grid';
+  $('#file-grid-view-button').classList.toggle('is-active', grid);
+  $('#file-grid-view-button').setAttribute('aria-pressed', String(grid));
+  $('#file-list-view-button').classList.toggle('is-active', !grid);
+  $('#file-list-view-button').setAttribute('aria-pressed', String(!grid));
+}
+
+function setFileView(view) {
+  if (!['list', 'grid'].includes(view) || state.fileView === view) return;
+  state.fileView = view;
+  syncFileViewControls();
+  void renderFileList({ animate: true });
 }
 
 function syncFileSelectionControls() {
@@ -591,9 +672,13 @@ async function renderFileList({ animate = false } = {}) {
     await new Promise((resolve) => window.setTimeout(resolve, 115));
     if (transitionId !== state.fileListTransitionId) return;
   }
-  fileList.replaceChildren(...(files.length ? [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
+  const isGrid = state.fileView === 'grid';
+  fileList.classList.toggle('file-grid', isGrid);
+  fileList.setAttribute('role', isGrid ? 'list' : 'table');
+  fileList.replaceChildren(...(files.length ? isGrid ? [fileGridHeader(files), ...files.map(fileCard)] : [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
   $('#file-count').textContent = `${files.length}개`;
   $('#files-title').textContent = `${pathParts(state.currentPath).at(-1) ?? '내 파일'}의 파일`;
+  syncFileViewControls();
   syncFileSelectionControls();
   if (animate) window.requestAnimationFrame(() => {
     if (transitionId === state.fileListTransitionId) fileList.classList.remove('is-changing');
@@ -888,7 +973,8 @@ function openFolderDeleteDialog(folder) {
 }
 
 function openFileDeleteDialog(file) {
-  state.pendingDelete = { type: 'file', id: file.id, name: file.name };
+  // Keep the source directory fixed while the confirmation dialog is open.
+  state.pendingDelete = { type: 'file', id: file.id, name: file.name, folderPath: state.currentPath };
   $('#delete-title').textContent = `“${file.name}” 파일을 삭제할까요?`;
   $('#delete-description').textContent = '웹 목록에서는 제거되지만 암호화 파일과 원본 파일은 이동식 디스크의 .ifile-manager-trash에 보관됩니다. 계속하려면 현재 비밀번호를 입력하세요.';
   $('#delete-submit').textContent = '휴지통으로 이동';
@@ -1020,6 +1106,8 @@ $('#file-search').addEventListener('input', (event) => { state.query = event.tar
 $('#file-input').addEventListener('change', async (event) => { await uploadSelectedFiles(event.target.files); event.target.value = ''; });
 $('#bulk-download-button').addEventListener('click', downloadSelectedFilesAsZip);
 $('#bulk-trash-delete-button').addEventListener('click', () => openTrashDeleteDialog(state.trash.entries.filter((file) => state.selectedTrashIds.has(file.id))));
+$('#file-grid-view-button').addEventListener('click', () => setFileView('grid'));
+$('#file-list-view-button').addEventListener('click', () => setFileView('list'));
 
 document.querySelectorAll('dialog button[value="cancel"]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
 document.querySelectorAll('.side-nav-item').forEach((button) => button.addEventListener('click', () => {
@@ -1065,7 +1153,7 @@ $('#delete-form').addEventListener('submit', async (event) => {
       await request('/api/trash', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileTrashIds: entries.filter((item) => item.type === 'file').map((item) => item.id), folderTrashIds: entries.filter((item) => item.type === 'folder').map((item) => item.id), reauthenticationToken: confirmation.token }) });
       $('#delete-dialog').close(); await loadTrash(); await refreshStorageAfterMutation(); setStatus(`${pending.count}개 항목을 영구 삭제했습니다.`);
     } else {
-      await request(`/api/files/${encodeURIComponent(pending.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reauthenticationToken: confirmation.token }) });
+      await request(`/api/files/${encodeURIComponent(pending.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reauthenticationToken: confirmation.token, folderPath: pending.folderPath }) });
       $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus('파일을 .ifile-manager-trash로 이동했습니다.');
     }
     state.pendingDelete = null;

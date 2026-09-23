@@ -153,10 +153,17 @@ function plainOriginalName(file) {
   return file.plainOriginalNameEncrypted ? clientFilename(open(file.plainOriginalNameEncrypted)) : managedFilename(open(file.nameEncrypted));
 }
 
-async function folderPathForFile(file) {
+async function folderPathForFile(file, fallbackPath = undefined) {
   if (file.folderPathKey === ROOT_PATH_KEY) return '';
   const folder = await ManagedFolder.findOne({ pathKey: file.folderPathKey }).lean();
-  if (!folder) throw new Error('The original folder metadata is unavailable');
+  // Files created before folder metadata migration can still be displayed in a
+  // valid directory, but their historical folder key may no longer resolve.
+  // The caller supplies that currently displayed directory only for this
+  // legacy case, so the file remains recoverable through the trash.
+  if (!folder) {
+    if (fallbackPath === undefined) throw new Error('The original folder metadata is unavailable');
+    return normalizeRelativePath(fallbackPath);
+  }
   return normalizeRelativePath(open(folder.pathEncrypted));
 }
 
@@ -1092,8 +1099,8 @@ app.delete('/api/files/:fileId', requireAppRequest, requireAuth, asyncRoute(asyn
   const file = await ManagedFile.findOne({ fileId: request.params.fileId }).lean();
   if (!file) return response.status(404).json({ error: 'File not found' });
 
-  const originalFolderPath = await folderPathForFile(file);
-  const originalFolder = file.folderPathKey === ROOT_PATH_KEY ? null : await ManagedFolder.findOne({ pathKey: file.folderPathKey }).lean();
+  const originalFolderPath = await folderPathForFile(file, request.body?.folderPath);
+  const originalFolder = originalFolderPath ? await ManagedFolder.findOne({ pathKey: keyForPath(originalFolderPath) }).lean() : null;
   const trashId = crypto.randomUUID();
   const encryptedPath = filePathFor(file.storageId);
   const deletionDirectory = trashDirectoryFor(trashId);
@@ -1102,7 +1109,7 @@ app.delete('/api/files/:fileId', requireAppRequest, requireAuth, asyncRoute(asyn
   let plainOriginalTrash;
   try {
     await fs.rename(encryptedPath, trashPath);
-    plainOriginalTrash = await movePlainOriginalFileToTrash(file, undefined, path.join(deletionDirectory, plainOriginalName(file)));
+    plainOriginalTrash = await movePlainOriginalFileToTrash(file, originalFolderPath, path.join(deletionDirectory, plainOriginalName(file)));
     await TrashedFile.create({
       trashId,
       originalFileId: file.fileId,
