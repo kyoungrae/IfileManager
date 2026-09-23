@@ -498,11 +498,16 @@ function syncFileSelectionControls() {
     selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleFiles.length;
   }
   const button = $('#bulk-download-button');
+  const deleteButton = $('#bulk-file-delete-button');
   const count = state.selectedFileIds.size;
   button.classList.toggle('is-hidden', count === 0);
   button.disabled = count === 0;
   button.setAttribute('aria-hidden', String(count === 0));
   $('#bulk-download-label').textContent = `선택 파일 ${count}개 ZIP 다운로드`;
+  deleteButton.classList.toggle('is-hidden', count === 0);
+  deleteButton.disabled = count === 0;
+  deleteButton.setAttribute('aria-hidden', String(count === 0));
+  $('#bulk-file-delete-label').textContent = `선택 파일 ${count}개 휴지통 이동`;
 }
 
 function trashFileRow(file) {
@@ -982,6 +987,17 @@ function openFileDeleteDialog(file) {
   $('#delete-dialog').showModal();
 }
 
+function openBulkFileDeleteDialog() {
+  const files = state.directory.files.filter((file) => state.selectedFileIds.has(file.id));
+  if (!files.length) return;
+  state.pendingDelete = { type: 'files', ids: files.map((file) => file.id), count: files.length, folderPath: state.currentPath };
+  $('#delete-title').textContent = `선택한 ${files.length}개 파일을 휴지통으로 이동할까요?`;
+  $('#delete-description').textContent = '선택한 파일은 웹 목록에서 제거되지만 암호화 파일과 원본 파일은 이동식 디스크의 .ifile-manager-trash에 보관되어 복원할 수 있습니다. 계속하려면 현재 비밀번호를 입력하세요.';
+  $('#delete-submit').textContent = '휴지통으로 이동';
+  $('#delete-password').value = ''; $('#delete-error').textContent = '';
+  $('#delete-dialog').showModal();
+}
+
 function openTrashDeleteDialog(files) {
   const selected = [...files];
   if (!selected.length) return;
@@ -1105,6 +1121,7 @@ $('#collapse-folders-button').addEventListener('click', () => setAllFoldersExpan
 $('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); if (state.section === 'v4log') renderV4LogList(); else if (state.section === 'trash') renderTrashList(); else renderFileList(); });
 $('#file-input').addEventListener('change', async (event) => { await uploadSelectedFiles(event.target.files); event.target.value = ''; });
 $('#bulk-download-button').addEventListener('click', downloadSelectedFilesAsZip);
+$('#bulk-file-delete-button').addEventListener('click', openBulkFileDeleteDialog);
 $('#bulk-trash-delete-button').addEventListener('click', () => openTrashDeleteDialog(state.trash.entries.filter((file) => state.selectedTrashIds.has(file.id))));
 $('#file-grid-view-button').addEventListener('click', () => setFileView('grid'));
 $('#file-list-view-button').addEventListener('click', () => setFileView('list'));
@@ -1152,6 +1169,9 @@ $('#delete-form').addEventListener('submit', async (event) => {
       const entries = pending.items;
       await request('/api/trash', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileTrashIds: entries.filter((item) => item.type === 'file').map((item) => item.id), folderTrashIds: entries.filter((item) => item.type === 'folder').map((item) => item.id), reauthenticationToken: confirmation.token }) });
       $('#delete-dialog').close(); await loadTrash(); await refreshStorageAfterMutation(); setStatus(`${pending.count}개 항목을 영구 삭제했습니다.`);
+    } else if (pending.type === 'files') {
+      await request('/api/files', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileIds: pending.ids, folderPath: pending.folderPath, reauthenticationToken: confirmation.token }) });
+      $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus(`${pending.count}개 파일을 .ifile-manager-trash로 이동했습니다.`);
     } else {
       await request(`/api/files/${encodeURIComponent(pending.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reauthenticationToken: confirmation.token, folderPath: pending.folderPath }) });
       $('#delete-dialog').close(); await loadFolder(); await refreshStorageAfterMutation(); setStatus('파일을 .ifile-manager-trash로 이동했습니다.');
