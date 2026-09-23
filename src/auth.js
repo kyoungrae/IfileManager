@@ -74,13 +74,25 @@ export function issueReauthentication(userId) {
 }
 
 export function verifyReauthentication(token, userId) {
-  const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
-  return payload.purpose === 'folder-delete' && payload.sub === userId;
+  try {
+    const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
+    return payload.purpose === 'folder-delete' && payload.sub === userId;
+  } catch {
+    return false;
+  }
 }
 
 export async function authenticate(usernameInput, password) {
   const username = normalizeUsername(usernameInput);
   const user = await User.findOne({ usernameKey: indexFor('username', username) });
+  if (!user || user.disabled || !(await bcrypt.compare(String(password ?? ''), user.passwordHash))) return null;
+  return user;
+}
+
+// Re-authentication must verify the already-authenticated account directly.
+// This avoids a secondary encrypted-username lookup when confirming a delete.
+export async function authenticateUserId(userId, password) {
+  const user = await User.findById(userId);
   if (!user || user.disabled || !(await bcrypt.compare(String(password ?? ''), user.passwordHash))) return null;
   return user;
 }

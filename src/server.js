@@ -10,10 +10,10 @@ import mongoose from 'mongoose';
 import multer from 'multer';
 import { config } from './config.js';
 import { decryptFile, encryptFile, indexFor, open, seal } from './crypto.js';
-import { AuditLog, ManagedFile, ManagedFolder, TrashedFile } from './models.js';
+import { AuditLog, ManagedFile, ManagedFolder, TrashedFile, TrashedFolder } from './models.js';
 import { writeStoredZip } from './zip.js';
 import {
-  authenticate, bootstrapAdmin, clearSession, createUser, issueReauthentication,
+  authenticate, authenticateUserId, bootstrapAdmin, clearSession, createUser, issueReauthentication,
   requireAdmin, requireAppRequest, requireAuth, setSession, verifyReauthentication
 } from './auth.js';
 import {
@@ -226,6 +226,10 @@ function trashDirectoryFor(trashId) {
   return path.join(trashRoot, `file-${trashId}`);
 }
 
+function folderTrashDirectoryFor(trashId) {
+  return path.join(trashRoot, `folder-${trashId}`);
+}
+
 async function regularFileOrNull(absolutePath) {
   try {
     const stat = await fs.lstat(absolutePath);
@@ -271,6 +275,7 @@ async function restoreDirectoryForTrashedFile(file) {
 function apiTrashedFile(file) {
   return {
     id: file.trashId,
+    type: 'file',
     name: managedFilename(open(file.nameEncrypted)),
     originalPath: normalizeRelativePath(open(file.originalFolderPathEncrypted)),
     size: file.size,
@@ -343,6 +348,195 @@ async function permanentlyDeleteTrashedFiles(files, actor) {
     }
     const deletion = await TrashedFile.deleteOne({ _id: file._id });
     if (deletion.deletedCount !== 1) throw new Error('Trash metadata could not be deleted');
+  }
+}
+
+function readTrashedFolderSnapshot(folder) {
+  const snapshot = JSON.parse(open(folder.snapshotEncrypted));
+  if (!snapshot || !Array.isArray(snapshot.folders) || !Array.isArray(snapshot.files) || typeof snapshot.rootPath !== 'string') {
+    throw new Error('Trash folder metadata is invalid');
+  }
+  return snapshot;
+}
+
+function folderTreeFromSnapshot(snapshot) {
+  const nodes = new Map(snapshot.folders.map((folder) => [folder.path, {
+    type: 'folder', name: open(folder.nameEncrypted), path: folder.path, children: []
+  }]));
+  const root = nodes.get(snapshot.rootPath);
+  if (!root) throw new Error('Trash folder root metadata is unavailable');
+  for (const folder of snapshot.folders) {
+    if (folder.path === snapshot.rootPath) continue;
+    const parent = nodes.get(parentRelativePath(folder.path));
+    if (parent) parent.children.push(nodes.get(folder.path));
+  }
+  for (const file of snapshot.files) {
+    const parent = nodes.get(file.folderPath);
+    if (parent) parent.children.push({ type: 'file', name: managedFilename(open(file.nameEncrypted)), size: file.size });
+  }
+  const sortEntries = (entries) => entries.sort((left, right) => (
+    left.type === right.type ? left.name.localeCompare(right.name, 'ko') : left.type === 'folder' ? -1 : 1
+  )).forEach((entry) => { if (entry.type === 'folder') sortEntries(entry.children); });
+  sortEntries(root.children);
+  return root.children;
+}
+
+function apiTrashedFolder(folder) {
+  const snapshot = readTrashedFolderSnapshot(folder);
+  return {
+    id: folder.trashId,
+    type: 'folder',
+    name: open(folder.nameEncrypted),
+    originalPath: normalizeRelativePath(open(folder.originalParentPathEncrypted)),
+    size: folder.size,
+    trashedAt: folder.createdAt,
+    children: folderTreeFromSnapshot(snapshot)
+  };
+}
+
+async function restoreDirectoryForTrashedFolder(folder) {
+  if (folder.originalParentFolderId) {
+    const parent = await ManagedFolder.findById(folder.originalParentFolderId).lean();
+    if (parent) {
+      try { return await existingDirectory(normalizeRelativePath(open(parent.pathEncrypted))); } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+  }
+  const originalParentPath = normalizeRelativePath(open(folder.originalParentPathEncrypted));
+  try { return await existingDirectory(originalParentPath); } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return existingDirectory('');
+  }
+}
+
+async function assertMissingDirectory(absolutePath) {
+  try {
+    await fs.lstat(absolutePath);
+    const error = new Error('A folder with that name already exists'); error.code = 'EEXIST'; throw error;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+async function restoreTrashedFolder(folder, actor) {
+  const snapshot = readTrashedFolderSnapshot(folder);
+  const oldRootPath = normalizeRelativePath(snapshot.rootPath);
+  const rootName = validateFolderName(open(folder.nameEncrypted));
+  const parent = await restoreDirectoryForTrashedFolder(folder);
+  const restoredRootPath = relativeChild(parent.normalized, rootName);
+  const restoredAbsolutePath = path.join(parent.absolutePath, rootName);
+  await assertMissingDirectory(restoredAbsolutePath);
+
+  const trashDirectory = folderTrashDirectoryFor(folder.trashId);
+  const encryptedSourcePath = path.join(trashDirectory, 'encrypted');
+  const encryptedFilesSourcePath = path.join(trashDirectory, 'files');
+  const plainSourcePath = path.join(trashDirectory, 'plain-originals');
+  const encryptedSourceStat = await fs.lstat(encryptedSourcePath);
+  if (!encryptedSourceStat.isDirectory() || encryptedSourceStat.isSymbolicLink()) throw new Error('Trash folder is unsafe');
+  let plainSourceExists = false;
+  try {
+    const plainSourceStat = await fs.lstat(plainSourcePath);
+    if (!plainSourceStat.isDirectory() || plainSourceStat.isSymbolicLink()) throw new Error('Trash plain-original folder is unsafe');
+    plainSourceExists = true;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  let plainDestinationPath;
+  if (plainSourceExists) {
+    const plainParent = await originalDirectory(parent.normalized, { create: true });
+    plainDestinationPath = path.join(plainParent.absolutePath, rootName);
+    await assertMissingDirectory(plainDestinationPath);
+  }
+
+  const restoredFolders = snapshot.folders.map((item) => {
+    const restoredPath = replacePathPrefix(item.path, oldRootPath, restoredRootPath);
+    return {
+      _id: item._id,
+      pathKey: keyForPath(restoredPath),
+      parentPathKey: keyForPath(parentRelativePath(restoredPath)),
+      nameEncrypted: item.nameEncrypted,
+      pathEncrypted: seal(restoredPath),
+      createdBy: item.createdBy
+    };
+  });
+  const restoredFiles = snapshot.files.map((item) => {
+    const restoredFolderPath = replacePathPrefix(item.folderPath, oldRootPath, restoredRootPath);
+    return {
+      fileId: item.fileId,
+      storageId: item.storageId,
+      folderPathKey: keyForPath(restoredFolderPath),
+      nameEncrypted: item.nameEncrypted,
+      ...(item.plainOriginalNameEncrypted ? { plainOriginalNameEncrypted: item.plainOriginalNameEncrypted } : {}),
+      mimeEncrypted: item.mimeEncrypted,
+      size: item.size,
+      uploadedBy: item.uploadedBy
+    };
+  });
+  const encryptedFileMoves = [];
+  if (restoredFiles.length) {
+    const encryptedFilesSourceStat = await fs.lstat(encryptedFilesSourcePath);
+    if (!encryptedFilesSourceStat.isDirectory() || encryptedFilesSourceStat.isSymbolicLink()) throw new Error('Trash encrypted-files folder is unsafe');
+    for (const file of restoredFiles) {
+      const sourcePath = path.join(encryptedFilesSourcePath, `${file.storageId}.ifm`);
+      if (!await regularFileOrNull(sourcePath)) throw new Error('A trashed encrypted file is unavailable');
+      const destinationPath = filePathFor(file.storageId);
+      try {
+        await fs.lstat(destinationPath);
+        const error = new Error('A stored file with this identifier already exists'); error.code = 'EEXIST'; throw error;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      encryptedFileMoves.push({ sourcePath, destinationPath });
+    }
+  }
+  let movedPlain = false;
+  let restoredFolderMetadata = false;
+  let restoredFileMetadata = false;
+  await fs.rename(encryptedSourcePath, restoredAbsolutePath);
+  try {
+    if (plainSourceExists) {
+      await fs.rename(plainSourcePath, plainDestinationPath);
+      movedPlain = true;
+    }
+    for (const { sourcePath, destinationPath } of encryptedFileMoves) await fs.rename(sourcePath, destinationPath);
+    if (restoredFolders.length) {
+      await ManagedFolder.insertMany(restoredFolders, { ordered: true });
+      restoredFolderMetadata = true;
+    }
+    if (restoredFiles.length) {
+      await ManagedFile.insertMany(restoredFiles, { ordered: true });
+      restoredFileMetadata = true;
+    }
+    await audit(actor, 'folder.restore', oldRootPath, { trashId: folder.trashId, restoredPath: restoredRootPath, filesRestored: restoredFiles.length });
+    const deletion = await TrashedFolder.deleteOne({ _id: folder._id });
+    if (deletion.deletedCount !== 1) throw new Error('Trash folder metadata could not be deleted');
+  } catch (error) {
+    if (restoredFileMetadata) await ManagedFile.deleteMany({ fileId: { $in: restoredFiles.map((item) => item.fileId) } }).catch(() => undefined);
+    if (restoredFolderMetadata) await ManagedFolder.deleteMany({ _id: { $in: restoredFolders.map((item) => item._id) } }).catch(() => undefined);
+    await Promise.all(encryptedFileMoves.slice().reverse().map(({ sourcePath, destinationPath }) => fs.rename(destinationPath, sourcePath).catch(() => undefined)));
+    if (movedPlain) await fs.rename(plainDestinationPath, plainSourcePath).catch(() => undefined);
+    await fs.rename(restoredAbsolutePath, encryptedSourcePath).catch(() => undefined);
+    throw error;
+  }
+  await fs.rmdir(encryptedFilesSourcePath).catch(() => undefined);
+  await fs.rmdir(trashDirectory).catch(() => undefined);
+  return { path: restoredRootPath, name: rootName, filesRestored: restoredFiles.length };
+}
+
+async function permanentlyDeleteTrashedFolders(folders, actor) {
+  for (const folder of folders) {
+    const directory = folderTrashDirectoryFor(folder.trashId);
+    await audit(actor, 'trash.folder_delete_permanent', open(folder.nameEncrypted), { trashId: folder.trashId, bytes: folder.size });
+    try {
+      const stat = await fs.lstat(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Trash folder is unsafe');
+      await fs.rm(directory, { recursive: true, force: true });
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    const deletion = await TrashedFolder.deleteOne({ _id: folder._id });
+    if (deletion.deletedCount !== 1) throw new Error('Trash folder metadata could not be deleted');
   }
 }
 
@@ -536,11 +730,17 @@ app.get('/api/storage', requireAuth, asyncRoute(async (_request, response) => {
 }));
 
 app.get('/api/trash', requireAuth, asyncRoute(async (_request, response) => {
-  const records = await TrashedFile.find({}).sort({ createdAt: -1 }).lean();
-  const files = records.flatMap((file) => {
+  const [fileRecords, folderRecords] = await Promise.all([
+    TrashedFile.find({}).lean(),
+    TrashedFolder.find({}).lean()
+  ]);
+  const files = fileRecords.flatMap((file) => {
     try { return [apiTrashedFile(file)]; } catch { return []; }
   });
-  response.json({ files });
+  const folders = folderRecords.flatMap((folder) => {
+    try { return [apiTrashedFolder(folder)]; } catch { return []; }
+  });
+  response.json({ entries: [...files, ...folders].sort((left, right) => new Date(right.trashedAt) - new Date(left.trashedAt)) });
 }));
 
 app.get('/api/v4-logs', requireAuth, asyncRoute(async (request, response) => {
@@ -567,8 +767,8 @@ app.post('/api/users', requireAppRequest, requireAuth, requireAdmin, asyncRoute(
 }));
 
 app.post('/api/auth/reauthenticate', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
-  const user = await authenticate(request.user.username, request.body?.password);
-  if (!user || user.id !== request.user.id) return response.status(401).json({ error: 'Password confirmation failed' });
+  const user = await authenticateUserId(request.user.id, request.body?.password);
+  if (!user) return response.status(401).json({ error: 'Password confirmation failed' });
   response.json({ token: issueReauthentication(request.user.id), expiresInSeconds: 300 });
 }));
 
@@ -701,31 +901,87 @@ app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (req
   const target = await existingDirectory(relativePath);
   const paths = await collectDirectoryPaths(target.normalized);
   const pathKeys = paths.map(keyForPath);
-  const files = await ManagedFile.find({ folderPathKey: { $in: pathKeys } }).lean();
-  const trashPath = path.join(trashRoot, `${crypto.randomUUID()}-deleted-folder`);
-  let plainOriginalTrash;
-
-  // Move first. This makes both copies immediately inaccessible and lets us restore them if metadata deletion fails.
-  plainOriginalTrash = await movePlainOriginalFolderToTrash(relativePath);
-  try { await fs.rename(target.absolutePath, trashPath); } catch (error) {
-    if (plainOriginalTrash) await fs.rename(plainOriginalTrash.trashPath, plainOriginalTrash.originalPath).catch(() => undefined);
-    throw error;
-  }
-  try {
-    // Audit first: a failure leaves both the data and metadata untouched after the rename is restored.
-    await audit(request.user.id, 'folder.delete', target.normalized, { filesDeleted: files.length });
-    await ManagedFolder.deleteMany({ pathKey: { $in: pathKeys } });
-    await ManagedFile.deleteMany({ folderPathKey: { $in: pathKeys } });
-  } catch (error) {
-    if (plainOriginalTrash) await fs.rename(plainOriginalTrash.trashPath, plainOriginalTrash.originalPath).catch(() => undefined);
-    await fs.rename(trashPath, target.absolutePath).catch(() => undefined);
-    throw error;
-  }
-  await Promise.all(files.map((file) => fs.unlink(filePathFor(file.storageId)).catch((error) => {
+  const [folders, files] = await Promise.all([
+    ManagedFolder.find({ pathKey: { $in: pathKeys } }).lean(),
+    ManagedFile.find({ folderPathKey: { $in: pathKeys } }).lean()
+  ]);
+  const pathByKey = new Map(paths.map((folderPath) => [keyForPath(folderPath), folderPath]));
+  const targetFolder = folders.find((folder) => folder.pathKey === keyForPath(target.normalized));
+  if (!targetFolder) throw new Error('Folder metadata is unavailable');
+  const originalParentPath = parentRelativePath(target.normalized);
+  const originalParentFolder = originalParentPath ? await ManagedFolder.findOne({ pathKey: keyForPath(originalParentPath) }).lean() : null;
+  const snapshot = {
+    rootPath: target.normalized,
+    folders: folders.flatMap((folder) => {
+      const folderPath = pathByKey.get(folder.pathKey);
+      return folderPath ? [{ _id: folder._id, path: folderPath, nameEncrypted: folder.nameEncrypted, createdBy: folder.createdBy }] : [];
+    }),
+    files: files.flatMap((file) => {
+      const folderPath = pathByKey.get(file.folderPathKey);
+      return folderPath ? [{
+        fileId: file.fileId, storageId: file.storageId, folderPath,
+        nameEncrypted: file.nameEncrypted,
+        ...(file.plainOriginalNameEncrypted ? { plainOriginalNameEncrypted: file.plainOriginalNameEncrypted } : {}),
+        mimeEncrypted: file.mimeEncrypted, size: file.size, uploadedBy: file.uploadedBy
+      }] : [];
+    })
+  };
+  const trashId = crypto.randomUUID();
+  const trashDirectory = folderTrashDirectoryFor(trashId);
+  const encryptedTrashPath = path.join(trashDirectory, 'encrypted');
+  const encryptedFilesTrashPath = path.join(trashDirectory, 'files');
+  const plainTrashPath = path.join(trashDirectory, 'plain-originals');
+  let plainOriginalSource;
+  try { plainOriginalSource = await originalDirectory(relativePath); } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-  })));
-  await fs.rm(trashPath, { recursive: true, force: true });
-  if (plainOriginalTrash) await fs.rm(plainOriginalTrash.trashPath, { recursive: true, force: true });
+  }
+  await fs.mkdir(trashDirectory, { mode: 0o700 });
+  let encryptedDirectoryMoved = false;
+  let plainOriginalMoved = false;
+  let folderMetadataDeleted = false;
+  let fileMetadataDeleted = false;
+  const encryptedFileMoves = [];
+  try {
+    await fs.rename(target.absolutePath, encryptedTrashPath);
+    encryptedDirectoryMoved = true;
+    await fs.mkdir(encryptedFilesTrashPath, { mode: 0o700 });
+    for (const file of files) {
+      const sourcePath = filePathFor(file.storageId);
+      const destinationPath = path.join(encryptedFilesTrashPath, `${file.storageId}.ifm`);
+      await fs.rename(sourcePath, destinationPath);
+      encryptedFileMoves.push({ sourcePath, destinationPath });
+    }
+    if (plainOriginalSource) {
+      await fs.rename(plainOriginalSource.absolutePath, plainTrashPath);
+      plainOriginalMoved = true;
+    }
+    await TrashedFolder.create({
+      trashId,
+      originalFolderId: targetFolder._id,
+      ...(originalParentFolder ? { originalParentFolderId: originalParentFolder._id } : {}),
+      originalPathEncrypted: seal(target.normalized),
+      originalParentPathEncrypted: seal(originalParentPath),
+      nameEncrypted: targetFolder.nameEncrypted,
+      snapshotEncrypted: seal(JSON.stringify(snapshot)),
+      size: files.reduce((total, file) => total + file.size, 0),
+      trashedBy: request.user.id
+    });
+    await audit(request.user.id, 'folder.trash', target.normalized, { filesTrashed: files.length, foldersTrashed: snapshot.folders.length });
+    await ManagedFolder.deleteMany({ pathKey: { $in: pathKeys } });
+    folderMetadataDeleted = true;
+    await ManagedFile.deleteMany({ folderPathKey: { $in: pathKeys } });
+    fileMetadataDeleted = true;
+  } catch (error) {
+    await TrashedFolder.deleteOne({ trashId }).catch(() => undefined);
+    if (fileMetadataDeleted) await ManagedFile.insertMany(files, { ordered: true }).catch(() => undefined);
+    if (folderMetadataDeleted) await ManagedFolder.insertMany(folders, { ordered: true }).catch(() => undefined);
+    if (plainOriginalMoved) await fs.rename(plainTrashPath, plainOriginalSource.absolutePath).catch(() => undefined);
+    await Promise.all(encryptedFileMoves.reverse().map(({ sourcePath, destinationPath }) => fs.rename(destinationPath, sourcePath).catch(() => undefined)));
+    if (encryptedDirectoryMoved) await fs.rename(encryptedTrashPath, target.absolutePath).catch(() => undefined);
+    await fs.rmdir(encryptedFilesTrashPath).catch(() => undefined);
+    await fs.rmdir(trashDirectory).catch(() => undefined);
+    throw error;
+  }
   response.status(204).end();
 }));
 
@@ -814,6 +1070,13 @@ app.post('/api/trash/:trashId/restore', requireAppRequest, requireAuth, asyncRou
   response.json(await restoreTrashedFile(file, request.user.id));
 }));
 
+app.post('/api/trash/folders/:trashId/restore', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
+  const [trashId] = selectedTrashIds(request.params.trashId);
+  const folder = await TrashedFolder.findOne({ trashId }).lean();
+  if (!folder) return response.status(404).json({ error: 'Trash folder not found' });
+  response.json(await restoreTrashedFolder(folder, request.user.id));
+}));
+
 app.delete('/api/trash/:trashId', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
   if (!verifyReauthentication(request.body?.reauthenticationToken, request.user.id)) return response.status(401).json({ error: 'Password confirmation has expired or is invalid' });
   const [trashId] = selectedTrashIds(request.params.trashId);
@@ -823,13 +1086,29 @@ app.delete('/api/trash/:trashId', requireAppRequest, requireAuth, asyncRoute(asy
   response.status(204).end();
 }));
 
+app.delete('/api/trash/folders/:trashId', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
+  if (!verifyReauthentication(request.body?.reauthenticationToken, request.user.id)) return response.status(401).json({ error: 'Password confirmation has expired or is invalid' });
+  const [trashId] = selectedTrashIds(request.params.trashId);
+  const folder = await TrashedFolder.findOne({ trashId }).lean();
+  if (!folder) return response.status(404).json({ error: 'Trash folder not found' });
+  await permanentlyDeleteTrashedFolders([folder], request.user.id);
+  response.status(204).end();
+}));
+
 app.delete('/api/trash', requireAppRequest, requireAuth, asyncRoute(async (request, response) => {
   if (!verifyReauthentication(request.body?.reauthenticationToken, request.user.id)) return response.status(401).json({ error: 'Password confirmation has expired or is invalid' });
-  const trashIds = selectedTrashIds(request.body?.trashIds);
-  const files = await TrashedFile.find({ trashId: { $in: trashIds } }).lean();
-  if (files.length !== trashIds.length) return response.status(404).json({ error: 'One or more selected trash files no longer exist' });
-  const byId = new Map(files.map((file) => [file.trashId, file]));
-  await permanentlyDeleteTrashedFiles(trashIds.map((id) => byId.get(id)), request.user.id);
+  const fileTrashIds = request.body?.fileTrashIds ? selectedTrashIds(request.body.fileTrashIds) : [];
+  const folderTrashIds = request.body?.folderTrashIds ? selectedTrashIds(request.body.folderTrashIds) : [];
+  if (!fileTrashIds.length && !folderTrashIds.length) throw new Error('Select at least one trash item');
+  const [files, folders] = await Promise.all([
+    fileTrashIds.length ? TrashedFile.find({ trashId: { $in: fileTrashIds } }).lean() : [],
+    folderTrashIds.length ? TrashedFolder.find({ trashId: { $in: folderTrashIds } }).lean() : []
+  ]);
+  if (files.length !== fileTrashIds.length || folders.length !== folderTrashIds.length) return response.status(404).json({ error: 'One or more selected trash items no longer exist' });
+  const filesById = new Map(files.map((file) => [file.trashId, file]));
+  const foldersById = new Map(folders.map((folder) => [folder.trashId, folder]));
+  await permanentlyDeleteTrashedFiles(fileTrashIds.map((id) => filesById.get(id)), request.user.id);
+  await permanentlyDeleteTrashedFolders(folderTrashIds.map((id) => foldersById.get(id)), request.user.id);
   response.status(204).end();
 }));
 

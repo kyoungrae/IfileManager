@@ -45,6 +45,18 @@ export const TrashedFile = model('TrashedFile', new Schema({
   trashedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }
 }, schemaOptions));
 
+export const TrashedFolder = model('TrashedFolder', new Schema({
+  trashId: { type: String, required: true, unique: true, index: true },
+  originalFolderId: { type: Schema.Types.ObjectId, ref: 'ManagedFolder', required: true },
+  originalParentFolderId: { type: Schema.Types.ObjectId, ref: 'ManagedFolder' },
+  originalPathEncrypted: { type: String, required: true },
+  originalParentPathEncrypted: { type: String, required: true },
+  nameEncrypted: { type: String, required: true },
+  snapshotEncrypted: { type: String, required: true },
+  size: { type: Number, required: true, min: 0 },
+  trashedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }
+}, schemaOptions));
+
 export const AuditLog = model('AuditLog', new Schema({
   actor: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   action: { type: String, required: true, index: true },
