@@ -10,12 +10,15 @@ export const fileRoot = path.join(config.dataRoot, 'files');
 export const plainOriginalRoot = path.join(config.dataRoot, '.ifile-manager-originals');
 export const tempRoot = path.join(config.dataRoot, '.ifile-manager-tmp');
 export const trashRoot = path.join(config.dataRoot, '.ifile-manager-trash');
+// Derived previews remain encrypted too. They are intentionally separate from
+// managed files because they can always be regenerated from the original.
+export const thumbnailRoot = path.join(config.dataRoot, '.ifile-manager-thumbnails');
 export const hostStorageStatsPath = config.hostStorageStatsPath;
 
 const folderName = /^[\p{L}\p{N}][\p{L}\p{N} ._()\-]{0,119}$/u;
 
 export async function initializeStorage() {
-  await Promise.all([storageRoot, fileRoot, plainOriginalRoot, tempRoot, trashRoot].map((directory) => fs.mkdir(directory, { recursive: true, mode: 0o700 })));
+  await Promise.all([storageRoot, fileRoot, plainOriginalRoot, tempRoot, trashRoot, thumbnailRoot].map((directory) => fs.mkdir(directory, { recursive: true, mode: 0o700 })));
 }
 
 function isByteCount(value) {

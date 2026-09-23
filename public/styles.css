@@ -129,6 +129,7 @@ button.folder-open:hover:not(:disabled), .folder-tree-node.is-active > .folder-t
 .rename-folder, .delete-folder { padding: .35rem .48rem; border-radius: 7px; font-size: .76rem; box-shadow: none; }
 .rename-folder { color: #365c91; background: #edf4ff; }.rename-folder:hover { background: #dceaff; box-shadow: none; transform: none; }
 .delete-folder { color: var(--danger); background: #fff1f3; }
+.folder-action-icon, .download-icon { display: none; }
 
 .storage-card { padding: 1.5rem; border: 1px solid #dce5f1; border-radius: 14px; background: #ffffffdc; box-shadow: 0 4px 14px #27497009; }
 .storage-card h2 { font-size: 1.1rem; }
@@ -196,6 +197,46 @@ dialog { width: min(92vw, 440px); padding: 1.65rem; border: 0; border-radius: 16
 @media (max-width: 640px) { .auth-card { width: min(100% - 2rem, 430px); padding: 1.65rem; margin: 5vh auto; }.auth-card h1 { font-size: 1.7rem; }.topbar { align-items: flex-start; gap: .85rem; flex-direction: column; padding: .9rem 1rem; }.page-title { min-width: 0; font-size: 1.25rem; }.title-chevron { display: none; }.account { width: 100%; min-width: 0; justify-content: space-between; gap: .75rem; }.account #current-user { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.account #logout-button { flex: 0 0 auto; min-height: 40px; padding: .55rem .75rem; }.workspace-body { padding: 1rem .75rem calc(1.5rem + env(safe-area-inset-bottom)); }.toolbar { gap: .75rem; }.search-box { min-height: 48px; padding-inline: .85rem; }.toolbar-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }.toolbar-actions button, .upload-button { width: 100%; min-width: 0; min-height: 44px; padding: .55rem .4rem; gap: .35rem; font-size: .78rem; }.toolbar-actions button span:last-child, .upload-button span:not([data-icon]) { overflow: hidden; text-overflow: ellipsis; }.breadcrumbs { min-height: 30px; margin: .75rem 0 1rem; font-size: .84rem; }.breadcrumbs::before { width: 17px; height: 17px; margin-right: .2rem; }.library-layout { gap: .85rem; }.storage-card { padding: 1rem; border-radius: 12px; }.storage-overview { gap: 1rem; margin: .85rem 0; }.storage-ring { width: 108px; height: 108px; }.storage-ring::before { width: 84px; height: 84px; }.storage-ring strong { gap: .28rem; font-size: 1.42rem; }.storage-ring strong::after { font-size: .58rem; }.storage-overview strong { font-size: 1.35rem; }.storage-legend { gap: .55rem; }.storage-legend dt, .storage-legend dd { font-size: .8rem; }.legend-dot { width: 15px; height: 15px; }.folder-section, .files-section { padding: .65rem .35rem .35rem; border-radius: 10px; }.folder-section .section-heading, .files-section .section-heading { padding: 0 .3rem; }.section-heading { align-items: center; flex-wrap: wrap; gap: .45rem .65rem; }.section-heading h2 { font-size: 1.05rem; }.section-heading .bulk-download-button { order: 3; width: 100%; margin-left: 0; }.section-heading .bulk-download-button.is-hidden { display: none; }.file-view-toggle { margin-left: auto; }.collapse-button { min-height: 36px; margin-left: auto; }.folder-tree-row { flex-wrap: wrap; min-height: 50px; padding: .25rem .45rem .25rem calc(.45rem + var(--folder-depth) * .78rem); }.folder-open { flex: 1 1 0; max-width: none; min-height: 40px; padding-inline: .28rem; }.folder-toggle { width: 30px; height: 40px; }.folder-actions { width: 100%; margin: 0 0 .1rem 30px; justify-content: flex-end; }.rename-folder, .delete-folder { min-height: 34px; padding: .4rem .55rem; }.file-row { grid-template-columns: 35px minmax(0, 1fr) 44px; gap: .35rem; min-height: 54px; padding: .45rem .5rem; }.file-row .file-meta, .file-row .file-size, .file-header > :nth-child(3), .file-header > :nth-child(4), .file-actions .download { display: none; }.file-header { min-height: 42px; }.file-actions { justify-content: flex-end; }.file-name { gap: .52rem; font-size: .86rem; }.file-preview-trigger, .trash-folder-name { min-height: 40px; padding-inline: .2rem; }.file-icon svg { width: 23px; height: 23px; }.delete-file { width: 38px; height: 38px; }.restore-file { min-height: 38px; padding: .45rem .5rem; }.file-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .55rem; padding: .55rem; }.file-card { grid-template-rows: 108px auto auto; gap: .45rem; padding: .45rem; }.file-card-thumbnail { height: 108px; }.file-card-checkbox { top: .7rem; left: .7rem; }.file-card-details > span { font-size: .68rem; }.file-card-actions .delete-file { width: 31px; height: 31px; }.trash-child-name { padding-left: calc((var(--trash-depth) - 1) * .7rem); }.folder-tree, .empty-panel { min-height: 0; }.files-section { margin-top: .9rem; }.file-empty { min-height: 150px; }.upload-dropbar { min-height: 82px; margin-top: .9rem; padding: .75rem; }.dropbar-content { min-width: 0; gap: .55rem; }.dropbar-content > div { min-width: 0; }.dropbar-content > div span { display: none; }.dropbar-icon svg { width: 27px; height: 27px; }.upload-dropbar strong { font-size: .84rem; }.operation-loading { padding: 1rem; }.operation-loading-card { width: min(100%, 330px); padding: 1.4rem 1.25rem; }.preview-dialog { width: 100vw; width: 100dvw; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; }.preview-header { padding: max(1rem, env(safe-area-inset-top)) 1rem .8rem; }.preview-header h2 { max-width: 66vw; font-size: 1rem; }.preview-content { padding: .65rem; }.preview-frame { min-height: 0; border-radius: 5px; }.preview-actions { padding: .75rem max(1rem, env(safe-area-inset-right)) max(.75rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); }.preview-video { width: 100%; }.preview-text { padding: .75rem; font-size: .76rem; }.preview-close { min-height: 38px; }.dialog-actions { flex-wrap: wrap-reverse; }.dialog-actions > * { min-height: 42px; }.dialog-actions button, .preview-download { flex: 1 1 120px; } }
 
 @media (max-width: 430px) { .sidebar { min-height: 58px; padding-block: .5rem; }.brand { width: 36px; height: 36px; }.brand-mark { width: 25px; height: 25px; }.side-nav { gap: .25rem; margin-left: .55rem; }.side-nav-item { width: 44px; height: 40px; }.toolbar-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }.toolbar-actions #toolbar-upload { grid-column: 1 / -1; }.toolbar-actions button, .upload-button { min-height: 42px; font-size: .8rem; }.storage-ring { width: 96px; height: 96px; }.storage-ring::before { width: 74px; height: 74px; }.storage-ring strong { font-size: 1.25rem; }.storage-overview { gap: .75rem; }.storage-overview strong { font-size: 1.18rem; }.storage-overview p, .storage-overview small { font-size: .78rem; }.empty-panel { padding: 1.4rem .9rem; }.folder-actions { margin-left: 26px; }.rename-folder, .delete-folder { font-size: .72rem; }.section-heading .bulk-download-button { width: 100%; font-size: .74rem; }.operation-loading-card { min-width: 0; }.operation-loading-card strong { font-size: .98rem; } }
+
+/* Mobile controls: keep each action reachable without consuming the file name. */
+@media (max-width: 640px) {
+  .toolbar { flex-direction: column; gap: .6rem; }
+  .search-box { flex: 0 0 auto; min-height: 44px; }
+  .search-box input { padding-block: .58rem; }
+
+  #files-section > .section-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: .35rem .45rem;
+  }
+  #files-section > .section-heading h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #files-section > .section-heading > #file-count { white-space: nowrap; }
+  #files-section > .section-heading .file-page-size,
+  #files-section > .section-heading .file-view-toggle { margin-left: 0; }
+  #files-section > .section-heading .bulk-download-button { grid-column: 1 / -1; width: 100%; margin-left: 0; }
+
+  .folder-tree-row { flex-wrap: nowrap; }
+  .folder-open { flex: 1 1 auto; min-width: 0; }
+  .folder-actions { flex: 0 0 auto; width: auto; margin: 0; gap: .25rem; }
+  .rename-folder, .delete-folder { display: grid; place-items: center; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; }
+  .folder-action-label { display: none; }
+  .folder-action-icon { display: grid; place-items: center; }
+  .folder-action-icon svg { width: 16px; height: 16px; stroke-width: 2; }
+
+  .file-row { grid-template-columns: 35px minmax(0, 1fr) 76px; gap: .35rem; }
+  .file-row .file-actions .download { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; }
+  .file-row .file-actions .download-label { display: none; }
+  .file-row .file-actions .download-icon { display: grid; place-items: center; }
+  .file-row .file-actions .download-icon svg { width: 17px; height: 17px; stroke-width: 2; }
+  .file-row .delete-file { width: 34px; height: 34px; }
+  .file-row .file-actions { gap: .25rem; }
+}
+
+@media (max-width: 430px) {
+  #files-section > .section-heading { grid-template-columns: minmax(0, 1fr) auto auto; }
+  #files-section > .section-heading > #file-count { display: none; }
+}
 
 @media (hover: none) { button:hover:not(:disabled), .upload-button:hover { transform: none; box-shadow: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

@@ -33,6 +33,8 @@ const iconPaths = {
   'folder-plus': '<path d="M3 6.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v5M9.5 12.5h5"/>',
   upload: '<path d="M12 15V3M7.5 7.5 12 3l4.5 4.5"/><path d="M5 13.5v4A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-4"/>',
   archive: '<path d="M4 7h16v13H4z"/><path d="M3 4h18v3H3zM9 11h6M9 15h6"/>',
+  download: '<path d="M12 3v12M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19.5v1.2h14v-1.2"/>',
+  pencil: '<path d="m4 20 4.1-.9L19 8.2a2.2 2.2 0 0 0-3.1-3.1L5 16l-1 4z"/><path d="m13.8 7.2 3 3"/>',
   grid: '<rect x="4" y="4" width="6" height="6" rx=".5"/><rect x="14" y="4" width="6" height="6" rx=".5"/><rect x="4" y="14" width="6" height="6" rx=".5"/><rect x="14" y="14" width="6" height="6" rx=".5"/>',
   list: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
@@ -369,8 +371,10 @@ function folderNode(folder, depth = 0, { root = false } = {}) {
   row.append(toggle, open);
   if (!root) {
     const actions = document.createElement('div'); actions.className = 'folder-actions';
-    const rename = document.createElement('button'); rename.className = 'rename-folder'; rename.type = 'button'; rename.textContent = '이름 변경'; rename.addEventListener('click', () => openFolderRenameDialog(folder));
-    const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.textContent = '삭제'; remove.addEventListener('click', () => openFolderDeleteDialog(folder));
+    const rename = document.createElement('button'); rename.className = 'rename-folder'; rename.type = 'button'; rename.title = '이름 변경'; rename.setAttribute('aria-label', `${folder.name} 이름 변경`);
+    const renameLabel = document.createElement('span'); renameLabel.className = 'folder-action-label'; renameLabel.textContent = '이름 변경'; rename.append(svgIcon('pencil', 'folder-action-icon'), renameLabel); rename.addEventListener('click', () => openFolderRenameDialog(folder));
+    const remove = document.createElement('button'); remove.className = 'delete-folder'; remove.type = 'button'; remove.title = '삭제'; remove.setAttribute('aria-label', `${folder.name} 삭제`);
+    const removeLabel = document.createElement('span'); removeLabel.className = 'folder-action-label'; removeLabel.textContent = '삭제'; remove.append(svgIcon('trash', 'folder-action-icon'), removeLabel); remove.addEventListener('click', () => openFolderDeleteDialog(folder));
     actions.append(rename, remove); row.append(actions);
   }
 
@@ -397,7 +401,8 @@ function fileRow(file) {
   const metadata = document.createElement('span'); metadata.className = 'file-meta'; metadata.textContent = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.createdAt));
   const size = document.createElement('span'); size.className = 'file-size'; size.textContent = formatSize(file.size);
   const actions = document.createElement('div'); actions.className = 'file-actions';
-  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.textContent = '다운로드'; attachDownloadLoading(download, `“${file.name}” 다운로드를 시작하고 있습니다.`);
+  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.title = `${file.name} 다운로드`; download.setAttribute('aria-label', `${file.name} 다운로드`);
+  const downloadLabel = document.createElement('span'); downloadLabel.className = 'download-label'; downloadLabel.textContent = '다운로드'; download.append(svgIcon('download', 'download-icon'), downloadLabel); attachDownloadLoading(download, `“${file.name}” 다운로드를 시작하고 있습니다.`);
   const remove = document.createElement('button'); remove.className = 'delete-file'; remove.type = 'button'; remove.setAttribute('aria-label', `${file.name} 삭제`); remove.title = '삭제'; remove.append(svgIcon('trash'));
   remove.addEventListener('click', () => openFileDeleteDialog(file));
   actions.append(download, remove);
@@ -443,7 +448,7 @@ function fileCard(file) {
   const icon = fileIconFor(file.name);
   const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'file-card-thumbnail'; preview.title = `${file.name} 미리보기`; preview.setAttribute('aria-label', `${file.name} 미리보기`);
   if (previewKindFor(file.name) === 'image') {
-    const image = document.createElement('img'); image.src = `/api/files/${encodeURIComponent(file.id)}/preview`; image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
+    const image = document.createElement('img'); image.src = `/api/files/${encodeURIComponent(file.id)}/thumbnail`; image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.fetchPriority = 'low';
     image.addEventListener('error', () => {
       showFileCardPlaceholder(preview, icon, file.name);
     }, { once: true });
@@ -459,7 +464,8 @@ function fileCard(file) {
   details.append(name, metadata);
 
   const actions = document.createElement('div'); actions.className = 'file-card-actions';
-  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.textContent = '다운로드'; attachDownloadLoading(download, `“${file.name}” 다운로드를 시작하고 있습니다.`);
+  const download = document.createElement('a'); download.className = 'download'; download.href = `/api/files/${encodeURIComponent(file.id)}/download`; download.download = file.name; download.title = `${file.name} 다운로드`; download.setAttribute('aria-label', `${file.name} 다운로드`);
+  const downloadLabel = document.createElement('span'); downloadLabel.className = 'download-label'; downloadLabel.textContent = '다운로드'; download.append(svgIcon('download', 'download-icon'), downloadLabel); attachDownloadLoading(download, `“${file.name}” 다운로드를 시작하고 있습니다.`);
   const remove = document.createElement('button'); remove.className = 'delete-file'; remove.type = 'button'; remove.setAttribute('aria-label', `${file.name} 삭제`); remove.title = '삭제'; remove.append(svgIcon('trash')); remove.addEventListener('click', () => openFileDeleteDialog(file));
   actions.append(download, remove);
   card.append(checkbox, preview, details, actions);

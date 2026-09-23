@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import mongoose from 'mongoose';
 import multer from 'multer';
+import sharp from 'sharp';
 import { config } from './config.js';
 import { decryptFile, encryptFile, indexFor, open, seal } from './crypto.js';
 import { AuditLog, ManagedFile, ManagedFolder, TrashedFile, TrashedFolder } from './models.js';
@@ -18,7 +19,7 @@ import {
 } from './auth.js';
 import {
   ROOT_PATH_KEY, collectDirectoryPaths, existingDirectory, fileRoot, initializeStorage,
-  normalizeRelativePath, originalDirectory, relativeChild, storageRoot, storageUsage, tempRoot, trashRoot, validateFolderName
+  normalizeRelativePath, originalDirectory, relativeChild, storageRoot, storageUsage, tempRoot, thumbnailRoot, trashRoot, validateFolderName
 } from './storage.js';
 
 const app = express();
@@ -49,6 +50,14 @@ const upload = multer({
 
 const keyForPath = (relativePath) => relativePath ? indexFor('folder-path', relativePath) : ROOT_PATH_KEY;
 const filePathFor = (storageId) => path.join(fileRoot, `${storageId}.ifm`);
+const thumbnailPathFor = (storageId) => path.join(thumbnailRoot, `${storageId}.ifm`);
+
+const THUMBNAIL_EDGE_PIXELS = 360;
+const THUMBNAIL_MAX_INPUT_PIXELS = 40_000_000;
+const THUMBNAIL_CONCURRENCY = 2;
+const thumbnailGenerationByStorageId = new Map();
+const thumbnailGenerationQueue = [];
+let activeThumbnailGenerations = 0;
 
 function apiUser(user) {
   return { id: user.id, username: user.username ?? open(user.usernameEncrypted), role: user.role };
@@ -103,6 +112,37 @@ function forcePreview(response, name, size) {
   };
   if (Number.isSafeInteger(size) && size >= 0) headers['Content-Length'] = String(size);
   response.set(headers);
+}
+
+function supportsThumbnail(name) {
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(path.extname(name).slice(1).toLocaleLowerCase('en-US'));
+}
+
+function forceThumbnail(response) {
+  response.set({
+    'Content-Type': 'image/webp',
+    'Cache-Control': 'private, max-age=2592000, immutable',
+    'X-Content-Type-Options': 'nosniff',
+    'Cross-Origin-Resource-Policy': 'same-origin'
+  });
+}
+
+function drainThumbnailGenerationQueue() {
+  while (activeThumbnailGenerations < THUMBNAIL_CONCURRENCY && thumbnailGenerationQueue.length) {
+    const job = thumbnailGenerationQueue.shift();
+    activeThumbnailGenerations += 1;
+    void job.task().then(job.resolve, job.reject).finally(() => {
+      activeThumbnailGenerations -= 1;
+      drainThumbnailGenerationQueue();
+    });
+  }
+}
+
+function queueThumbnailGeneration(task) {
+  return new Promise((resolve, reject) => {
+    thumbnailGenerationQueue.push({ task, resolve, reject });
+    drainThumbnailGenerationQueue();
+  });
 }
 
 function selectedFileIds(input) {
@@ -271,6 +311,48 @@ async function regularFileOrNull(absolutePath) {
     if (error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+async function cachedThumbnailPath(file, name) {
+  if (!supportsThumbnail(name)) throw new Error('This file type does not support thumbnails');
+  const cachedPath = thumbnailPathFor(file.storageId);
+  if (await regularFileOrNull(cachedPath)) return cachedPath;
+
+  const existingGeneration = thumbnailGenerationByStorageId.get(file.storageId);
+  if (existingGeneration) return existingGeneration;
+
+  const generation = queueThumbnailGeneration(async () => {
+    if (await regularFileOrNull(cachedPath)) return cachedPath;
+    const sourcePath = path.join(tempRoot, `${crypto.randomUUID()}.thumbnail-source`);
+    const outputPath = path.join(tempRoot, `${crypto.randomUUID()}.thumbnail.webp`);
+    try {
+      await decryptFile(filePathFor(file.storageId), createWriteStream(sourcePath, { flags: 'wx', mode: 0o600 }));
+      await sharp(sourcePath, { animated: false, failOn: 'none', limitInputPixels: THUMBNAIL_MAX_INPUT_PIXELS })
+        .rotate()
+        .resize(THUMBNAIL_EDGE_PIXELS, THUMBNAIL_EDGE_PIXELS, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 72, effort: 4 })
+        .toFile(outputPath);
+      await encryptFile(outputPath, cachedPath);
+      return cachedPath;
+    } finally {
+      await Promise.all([sourcePath, outputPath].map((temporaryPath) => fs.unlink(temporaryPath).catch(() => undefined)));
+    }
+  });
+  thumbnailGenerationByStorageId.set(file.storageId, generation);
+  try {
+    return await generation;
+  } finally {
+    thumbnailGenerationByStorageId.delete(file.storageId);
+  }
+}
+
+async function removeCachedThumbnail(storageId) {
+  // If a generation started immediately before deletion, let it finish first
+  // so it cannot recreate an orphaned cache entry afterwards.
+  await thumbnailGenerationByStorageId.get(storageId)?.catch(() => undefined);
+  await fs.unlink(thumbnailPathFor(storageId)).catch((error) => {
+    if (error.code !== 'ENOENT') console.warn(`Unable to remove thumbnail cache for ${storageId}:`, error.message);
+  });
 }
 
 async function availablePlainOriginalPath(folderPath, desiredName) {
@@ -1044,6 +1126,7 @@ app.delete('/api/folders', requireAppRequest, requireAuth, asyncRoute(async (req
     folderMetadataDeleted = true;
     await ManagedFile.deleteMany({ folderPathKey: { $in: pathKeys } });
     fileMetadataDeleted = true;
+    await Promise.all(files.map((file) => removeCachedThumbnail(file.storageId)));
   } catch (error) {
     await TrashedFolder.deleteOne({ trashId }).catch(() => undefined);
     if (fileMetadataDeleted) await ManagedFile.insertMany(files, { ordered: true }).catch(() => undefined);
@@ -1122,6 +1205,7 @@ async function moveManagedFileToTrash(file, actor, fallbackFolderPath = undefine
     await audit(actor, 'file.trash', open(file.nameEncrypted), { fileId: file.fileId, bytes: file.size });
     const deletion = await ManagedFile.deleteOne({ _id: file._id });
     if (deletion.deletedCount !== 1) throw new Error('File metadata could not be deleted');
+    await removeCachedThumbnail(file.storageId);
   } catch (error) {
     await TrashedFile.deleteOne({ trashId }).catch(() => undefined);
     if (plainOriginalTrash) await fs.rename(plainOriginalTrash.trashPath, plainOriginalTrash.originalPath).catch(() => undefined);
@@ -1214,6 +1298,19 @@ app.get('/api/files/:fileId/preview', requireAuth, asyncRoute(async (request, re
   forcePreview(response, name, file.size);
   await audit(request.user.id, 'file.preview', name, { fileId: file.fileId, bytes: file.size });
   await decryptFile(filePathFor(file.storageId), response);
+}));
+
+// The file grid only needs a compact visual. The generated WebP is encrypted
+// at rest and browser-cached, avoiding full-size image decryption/downloads
+// whenever the user revisits a folder or changes a page.
+app.get('/api/files/:fileId/thumbnail', requireAuth, asyncRoute(async (request, response) => {
+  const file = await ManagedFile.findOne({ fileId: request.params.fileId }).lean();
+  if (!file) return response.status(404).json({ error: 'File not found' });
+  const name = managedFilename(open(file.nameEncrypted));
+  if (!supportsThumbnail(name)) return response.status(400).json({ error: 'File type does not support thumbnails' });
+  const cachedPath = await cachedThumbnailPath(file, name);
+  forceThumbnail(response);
+  await decryptFile(cachedPath, response);
 }));
 
 // Native form submission lets the browser stream a large ZIP directly to its
