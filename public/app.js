@@ -79,16 +79,21 @@ function setStatus(message = '', isError = false) {
 }
 
 let loadingDismissTimer;
+let operationProgressTimer;
 
 function showOperationLoading(title, description) {
   window.clearTimeout(loadingDismissTimer);
+  window.clearInterval(operationProgressTimer);
   $('#operation-loading-title').textContent = title;
   $('#operation-loading-description').textContent = description;
+  $('#operation-progress').hidden = true;
   $('#operation-loading').hidden = false;
 }
 
 function hideOperationLoading() {
   window.clearTimeout(loadingDismissTimer);
+  window.clearInterval(operationProgressTimer);
+  $('#operation-progress').hidden = true;
   $('#operation-loading').hidden = true;
 }
 
@@ -101,6 +106,86 @@ function showDownloadLoading(description = '다운로드를 시작하고 있습�
 
 function attachDownloadLoading(link, description) {
   link.addEventListener('click', () => showDownloadLoading(description));
+}
+
+function formatDuration(milliseconds) {
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours) return `${hours}시간 ${minutes}분`;
+  if (minutes) return `${minutes}분 ${seconds}초`;
+  return `${seconds}초`;
+}
+
+function renderUploadProgress(progress) {
+  const hasCurrentFile = progress.completed < progress.total;
+  const currentFileSize = Math.max(0, progress.currentFile?.size ?? 0);
+  const transferRatio = progress.currentTransferTotal > 0
+    ? Math.min(1, progress.currentTransferredBytes / progress.currentTransferTotal)
+    : 0;
+  // The final 2% is reserved for server-side encryption and the disk write.
+  // This prevents a misleading 100% display before a file is actually saved.
+  const currentRatio = hasCurrentFile ? Math.min(0.98, transferRatio) : 0;
+  const bytesDone = progress.completedBytes + (currentFileSize * currentRatio);
+  const countRatio = progress.total ? (progress.completed + currentRatio) / progress.total : 0;
+  const rawRatio = progress.completed === progress.total
+    ? 1
+    : progress.totalBytes > 0 ? bytesDone / progress.totalBytes : countRatio;
+  const ratio = Math.max(0, Math.min(1, rawRatio));
+  const percent = Math.floor(ratio * 100);
+  const elapsed = Date.now() - progress.startedAt;
+  const canEstimate = ratio >= 0.02 && ratio < 1;
+  const remaining = canEstimate ? Math.max(0, (elapsed / ratio) - elapsed) : null;
+  const filePosition = Math.min(progress.total, progress.completed + 1);
+
+  $('#operation-progress-label').textContent = `완료 ${progress.completed} / ${progress.total}개`;
+  $('#operation-progress-percent').textContent = `${percent}%`;
+  $('#operation-progress-track').setAttribute('aria-valuenow', String(percent));
+  $('#operation-progress-bar').style.width = `${ratio * 100}%`;
+  $('#operation-progress-time').textContent = remaining === null
+    ? `경과 ${formatDuration(elapsed)} · 남은 시간 계산 중`
+    : `경과 ${formatDuration(elapsed)} · 약 ${formatDuration(remaining)} 남음`;
+
+  if (hasCurrentFile) {
+    const phase = progress.isSaving ? '암호화 및 저장 중' : '업로드 중';
+    $('#operation-loading-description').textContent = `현재 ${filePosition} / ${progress.total}개 · “${progress.currentFile.name}” ${phase}`;
+  } else {
+    $('#operation-loading-description').textContent = `${progress.total}개 파일의 암호화 및 저장을 완료했습니다.`;
+  }
+}
+
+function beginUploadProgress(progress) {
+  $('#operation-progress').hidden = false;
+  renderUploadProgress(progress);
+  window.clearInterval(operationProgressTimer);
+  operationProgressTimer = window.setInterval(() => renderUploadProgress(progress), 1_000);
+}
+
+function uploadFileWithProgress(file, folderPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    const data = new FormData();
+    data.append('folderPath', folderPath);
+    data.append('files', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/files');
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('X-IFile-Manager', '1');
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onProgress({ loaded: event.loaded, total: event.total });
+    });
+    xhr.addEventListener('load', () => {
+      let response = {};
+      try { response = JSON.parse(xhr.responseText || '{}'); }
+      catch { response = {}; }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(response);
+      else reject(new Error(response.error || '파일을 업로드하지 못했습니다.'));
+    });
+    xhr.addEventListener('error', () => reject(new Error('파일 업로드 중 네트워크 오류가 발생했습니다.')));
+    xhr.addEventListener('abort', () => reject(new Error('파일 업로드가 취소되었습니다.')));
+    xhr.send(data);
+  });
 }
 
 function formatSize(bytes) {
@@ -836,15 +921,47 @@ async function restoreTrashEntry(file) {
 async function uploadSelectedFiles(files) {
   const selectedFiles = [...(files ?? [])];
   if (!selectedFiles.length) return;
-  const data = new FormData(); data.append('folderPath', state.currentPath); selectedFiles.forEach((file) => data.append('files', file));
-  showOperationLoading('파일 업로드 중…', selectedFiles.length === 1 ? `“${selectedFiles[0].name}” 파일을 암호화하고 저장하고 있습니다.` : `${selectedFiles.length}개 파일을 암호화하고 저장하고 있습니다.`);
-  setStatus(selectedFiles.length === 1 ? `“${selectedFiles[0].name}” 암호화 후 업로드 중…` : `${selectedFiles.length}개 파일을 암호화 후 업로드 중…`);
+  const progress = {
+    total: selectedFiles.length,
+    completed: 0,
+    totalBytes: selectedFiles.reduce((total, file) => total + Math.max(0, file.size ?? 0), 0),
+    completedBytes: 0,
+    currentFile: selectedFiles[0],
+    currentTransferredBytes: 0,
+    currentTransferTotal: selectedFiles[0].size ?? 0,
+    isSaving: false,
+    startedAt: Date.now()
+  };
+  showOperationLoading('파일 업로드 중…', '파일 업로드를 준비하고 있습니다.');
+  beginUploadProgress(progress);
+  setStatus(`${selectedFiles.length}개 파일을 암호화 후 업로드 중…`);
   try {
-    const result = await request('/api/files', { method: 'POST', body: data });
+    for (const file of selectedFiles) {
+      progress.currentFile = file;
+      progress.currentTransferredBytes = 0;
+      progress.currentTransferTotal = file.size ?? 0;
+      progress.isSaving = false;
+      renderUploadProgress(progress);
+      await uploadFileWithProgress(file, state.currentPath, ({ loaded, total }) => {
+        progress.currentTransferredBytes = loaded;
+        progress.currentTransferTotal = total;
+        progress.isSaving = loaded >= total;
+        renderUploadProgress(progress);
+      });
+      progress.completed += 1;
+      progress.completedBytes += Math.max(0, file.size ?? 0);
+      progress.isSaving = false;
+      renderUploadProgress(progress);
+    }
     await loadFolder(); await refreshStorageAfterMutation();
-    setStatus(result.files.length === 1 ? '파일을 암호화하여 업로드했습니다.' : `${result.files.length}개 파일을 암호화하여 업로드했습니다.`);
+    setStatus(selectedFiles.length === 1 ? '파일을 암호화하여 업로드했습니다.' : `${selectedFiles.length}개 파일을 암호화하여 업로드했습니다.`);
   }
-  catch (error) { setStatus(error.message, true); }
+  catch (error) {
+    if (progress.completed) {
+      await loadFolder(); await refreshStorageAfterMutation();
+      setStatus(`${progress.completed}개 파일을 저장했지만 이후 업로드에 실패했습니다: ${error.message}`, true);
+    } else setStatus(error.message, true);
+  }
   finally { hideOperationLoading(); }
 }
 

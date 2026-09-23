@@ -2,7 +2,7 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light">
     <title>IFile Manager</title>
     <link rel="stylesheet" href="/styles.css">
@@ -69,7 +69,7 @@
         </section>
       </section>
       <iframe class="download-target" name="zip-download-target" title="ZIP 다운로드" aria-hidden="true"></iframe>
-      <section id="operation-loading" class="operation-loading" aria-live="assertive" aria-busy="true" hidden><div class="operation-loading-card"><span class="operation-spinner" aria-hidden="true"></span><strong id="operation-loading-title">처리 중…</strong><p id="operation-loading-description">잠시만 기다려주세요.</p></div></section>
+      <section id="operation-loading" class="operation-loading" aria-live="assertive" aria-busy="true" hidden><div class="operation-loading-card"><span class="operation-spinner" aria-hidden="true"></span><strong id="operation-loading-title">처리 중…</strong><p id="operation-loading-description">잠시만 기다려주세요.</p><div id="operation-progress" class="operation-progress" hidden><div class="operation-progress-meta"><span id="operation-progress-label">완료 0 / 0개</span><strong id="operation-progress-percent">0%</strong></div><div id="operation-progress-track" class="operation-progress-track" role="progressbar" aria-label="파일 업로드 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="operation-progress-bar"></span></div><p id="operation-progress-time">경과 0초</p></div></div></section>
     </main>
 
     <dialog id="folder-dialog"><form method="dialog" id="folder-form"><p class="dialog-eyebrow">새 폴더</p><h2>폴더를 만들까요?</h2><label>폴더 이름<input id="folder-name" maxlength="120" required autofocus></label><p class="subtle">한글·영문·숫자와 공백, 점, 밑줄, 괄호, 하이픈을 사용할 수 있습니다.</p><p id="folder-error" class="form-error" role="alert"></p><div class="dialog-actions"><button value="cancel" class="quiet" type="button">취소</button><button id="folder-submit" value="default">만들기</button></div></form></dialog>
