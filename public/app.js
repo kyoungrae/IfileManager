@@ -8,6 +8,8 @@ const state = {
   expandedFolderPaths: new Set(['']),
   selectedFileIds: new Set(),
   fileView: 'list',
+  filePage: 1,
+  filePageSize: 20,
   fileListTransitionId: 0,
   section: 'files',
   v4Logs: { path: '', entries: [] },
@@ -488,6 +490,21 @@ function setFileView(view) {
   void renderFileList({ animate: true });
 }
 
+function setFilePage(page) {
+  state.filePage = Math.max(1, Number(page) || 1);
+  void renderFileList({ animate: true });
+}
+
+function syncFilePaginationControls({ total, start, end, totalPages }) {
+  const pagination = $('#file-pagination');
+  const hasMultiplePages = totalPages > 1;
+  pagination.hidden = !hasMultiplePages;
+  $('#file-page-previous').disabled = state.filePage <= 1;
+  $('#file-page-next').disabled = state.filePage >= totalPages;
+  $('#file-page-summary').textContent = total ? `${start}–${end} / ${total}개 · ${state.filePage} / ${totalPages} 페이지` : '';
+  $('#file-page-size').value = String(state.filePageSize);
+}
+
 function syncFileSelectionControls() {
   const visibleFiles = state.directory.files.filter((file) => nameMatches(file.name));
   const selectedVisibleCount = visibleFiles.filter((file) => state.selectedFileIds.has(file.id)).length;
@@ -670,6 +687,10 @@ function renderFolderTree() {
 
 async function renderFileList({ animate = false } = {}) {
   const files = state.directory.files.filter((file) => nameMatches(file.name));
+  const totalPages = Math.max(1, Math.ceil(files.length / state.filePageSize));
+  state.filePage = Math.min(state.filePage, totalPages);
+  const startIndex = (state.filePage - 1) * state.filePageSize;
+  const pageFiles = files.slice(startIndex, startIndex + state.filePageSize);
   const fileList = $('#file-list');
   const transitionId = ++state.fileListTransitionId;
   if (animate && fileList.childElementCount) {
@@ -680,10 +701,11 @@ async function renderFileList({ animate = false } = {}) {
   const isGrid = state.fileView === 'grid';
   fileList.classList.toggle('file-grid', isGrid);
   fileList.setAttribute('role', isGrid ? 'list' : 'table');
-  fileList.replaceChildren(...(files.length ? isGrid ? [fileGridHeader(files), ...files.map(fileCard)] : [fileTableHeader(), ...files.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
+  fileList.replaceChildren(...(files.length ? isGrid ? [fileGridHeader(pageFiles), ...pageFiles.map(fileCard)] : [fileTableHeader(), ...pageFiles.map(fileRow)] : [state.query ? emptySearch('파일') : emptyFiles()]));
   $('#file-count').textContent = `${files.length}개`;
   $('#files-title').textContent = `${pathParts(state.currentPath).at(-1) ?? '내 파일'}의 파일`;
   syncFileViewControls();
+  syncFilePaginationControls({ total: files.length, start: startIndex + 1, end: startIndex + pageFiles.length, totalPages });
   syncFileSelectionControls();
   if (animate) window.requestAnimationFrame(() => {
     if (transitionId === state.fileListTransitionId) fileList.classList.remove('is-changing');
@@ -863,7 +885,9 @@ async function loadFolderTree() {
 async function loadFolder(path = state.currentPath, { animate = true } = {}) {
   try {
     const data = await request(`/api/folders?${new URLSearchParams({ path })}`, { headers: {} });
+    const changedFolder = state.currentPath !== data.path;
     state.currentPath = data.path;
+    if (changedFolder) state.filePage = 1;
     expandFolderAncestors(data.path);
     state.directory = { files: data.files };
     const availableIds = new Set(data.files.map((file) => file.id));
@@ -904,7 +928,7 @@ async function loadV4Logs(path = state.v4Logs.path) {
 }
 
 async function showFiles() {
-  state.query = ''; $('#file-search').value = '';
+  state.query = ''; state.filePage = 1; $('#file-search').value = '';
   setWorkspaceSection('files');
   await loadFolder(state.currentPath);
 }
@@ -1118,11 +1142,14 @@ $('#up-button').addEventListener('click', () => {
 });
 $('#new-folder-button').addEventListener('click', openFolderDialog);
 $('#collapse-folders-button').addEventListener('click', () => setAllFoldersExpanded(!state.expandedFolderPaths.has('')));
-$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); if (state.section === 'v4log') renderV4LogList(); else if (state.section === 'trash') renderTrashList(); else renderFileList(); });
+$('#file-search').addEventListener('input', (event) => { state.query = event.target.value.trim(); state.filePage = 1; if (state.section === 'v4log') renderV4LogList(); else if (state.section === 'trash') renderTrashList(); else renderFileList(); });
 $('#file-input').addEventListener('change', async (event) => { await uploadSelectedFiles(event.target.files); event.target.value = ''; });
 $('#bulk-download-button').addEventListener('click', downloadSelectedFilesAsZip);
 $('#bulk-file-delete-button').addEventListener('click', openBulkFileDeleteDialog);
 $('#bulk-trash-delete-button').addEventListener('click', () => openTrashDeleteDialog(state.trash.entries.filter((file) => state.selectedTrashIds.has(file.id))));
+$('#file-page-size').addEventListener('change', (event) => { state.filePageSize = Number(event.target.value); state.filePage = 1; void renderFileList({ animate: true }); });
+$('#file-page-previous').addEventListener('click', () => setFilePage(state.filePage - 1));
+$('#file-page-next').addEventListener('click', () => setFilePage(state.filePage + 1));
 $('#file-grid-view-button').addEventListener('click', () => setFileView('grid'));
 $('#file-list-view-button').addEventListener('click', () => setFileView('list'));
 
